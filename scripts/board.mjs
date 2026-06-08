@@ -16,6 +16,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
+import { checkPresetCoverage } from "./lib/presets.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Default config lives at the repo root as board.json (one level up from scripts/).
@@ -593,6 +594,42 @@ function runDoctor(flags) {
   } else {
     add("project-access", "SKIP", ghOk ? "config invalid" : "gh not available");
     add("stage-options", "SKIP", ghOk ? "config invalid" : "gh not available");
+  }
+
+  // preset-coverage check — pure, offline, no board access needed.
+  // Runs whenever config loaded OK and board.json names a preset.
+  if (cfg && cfg.preset) {
+    try {
+      // Load the preset synchronously (same pattern as the engine's readFileSync usage).
+      const presetPath = resolve(__dirname, "..", "presets", `${cfg.preset}.json`);
+      let presetObj;
+      try {
+        presetObj = JSON.parse(readFileSync(presetPath, "utf8"));
+      } catch (e) {
+        add("preset-coverage", "FAIL",
+          `preset "${cfg.preset}" not found or invalid: ${e.message}`);
+        presetObj = null;
+      }
+      if (presetObj) {
+        const cov = checkPresetCoverage(presetObj, cfg.stageOptions);
+        if (cov.ok) {
+          add("preset-coverage", "PASS",
+            `all ${presetObj.lanes.length} preset lanes covered by stageOptions`);
+        } else {
+          add("preset-coverage", "FAIL",
+            `preset "${cfg.preset}" lanes missing from stageOptions: ${cov.missing.join(", ")}. ` +
+            `\n  UI setup checklist — add these lanes to your GitHub Project board:\n` +
+            cov.missing.map((l) => `  [ ] Add single-select option "${l}" to the Stage field`).join("\n") +
+            `\n  Then re-run: node scripts/board.mjs stage-field --json  (capture new optionIds into board.json)`);
+        }
+      }
+    } catch (e) {
+      add("preset-coverage", "FAIL", `preset-coverage check error: ${e.message}`);
+    }
+  } else if (cfg) {
+    add("preset-coverage", "SKIP", "no preset configured in board.json");
+  } else {
+    add("preset-coverage", "SKIP", "config invalid — skipping preset check");
   }
 
   const failed = checks.filter((c) => c.status === "FAIL").length;
