@@ -57,21 +57,23 @@ test('followup honors an explicit owner and existing body', async () => {
   assert.deepEqual(labelCall.args[1], ['needs-claude']);
 });
 
-test('followup in staged mode previews by title without committing', async () => {
+test('followup in staged mode previews via createIssue ONLY (no downstream ops on a null issue)', async () => {
+  // Corrected contract (same live-caught bug as put): no real issue exists in
+  // staged mode, so followup must call ONLY createIssue and must NOT chain
+  // addIssueToBoard/setStage/setLabels on a nonexistent issue.
   const engine = makeMockEngine({
     createIssue: () => ({ staged: true, wouldRun: {} }),
-    addIssueToBoard: () => ({ staged: true, wouldRun: {} }),
-    setStage: () => ({ staged: true, wouldRun: {} }),
-    setLabels: () => ({ staged: true, wouldRun: {} }),
   });
   const ctx = { engine, config: followupCfg(), staged: true };
   const r = await followup(9, { title: 'Write tests' }, ctx);
 
   const ops = engine.calls.map((c) => c.op);
-  assert.deepEqual(ops, ['createIssue', 'addIssueToBoard', 'setStage', 'setLabels']);
-  for (const call of engine.calls) {
-    assert.equal(call.args.at(-1)?.staged, true, `${call.op} passed { staged:true }`);
-  }
+  assert.deepEqual(ops, ['createIssue']);
+  assert.ok(!ops.includes('addIssueToBoard'), 'must NOT call addIssueToBoard on a nonexistent staged issue');
+  assert.ok(!ops.includes('setStage'), 'must NOT call setStage on a nonexistent staged issue');
+  assert.ok(!ops.includes('setLabels'), 'must NOT call setLabels on a nonexistent staged issue');
+
+  assert.equal(engine.calls[0].args.at(-1)?.staged, true, 'createIssue passed { staged:true }');
   assert.equal(r.committed, false);
   assert.match(r.say, /Would file follow-up 'Write tests' \(Claude's queue\)/);
 });

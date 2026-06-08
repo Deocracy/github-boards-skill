@@ -113,9 +113,12 @@ export async function queue(owner, ctx) {
 
 /**
  * put(tasks, ctx) — "put this/these on the board".
- * For each task, in order: createIssue -> addIssueToBoard -> setStage -> setLabels.
- * In staged mode every op is still CALLED with { staged:true } (the engine returns a
- * plan and writes nothing); we report "Would file" and do NOT mark committed.
+ * Commit path, per task in order: createIssue -> addIssueToBoard -> setStage -> setLabels.
+ * In staged mode there is NO real issue, so the downstream ops cannot operate on it
+ * (the real engine null-derefs on issueUrl.match before its stagedGuard — a live
+ * `put --staged` caught this). We therefore call ONLY createIssue (which previews +
+ * validates via its stagedGuard), preview the chain from the INPUTS, report "Would
+ * file", and do NOT mark committed.
  * @param {Array<{title:string, body?:string, lane?:string, owner?:'agent'|'human'}>} tasks
  * @param {object} ctx  { engine, config, staged }
  * @returns {Promise<{committed:boolean, created:object[], say:string}>}
@@ -136,24 +139,30 @@ export async function put(tasks, ctx) {
     const owner = task.owner || 'human';
     const label = config.routing[owner];
 
-    // EXACT order: create -> add -> stage -> label. Each threads { staged }.
-    //
-    // HARD RULE: in staged mode we STILL call every op (the engine returns a
-    // `{ staged, wouldRun }` plan and writes nothing) to honor Invariant 4 and
-    // exercise the engine's validation. But a staged return carries NO real
-    // url/number/itemId. So the human-facing preview is built from the INPUTS
-    // (title, lane, owner), NOT from these id-less staged returns — keeping the
-    // chain flowing on clean placeholders rather than `undefined`, and the `say`
-    // legible (no `#null`, no sentinel strings).
-    const issue = await engine.createIssue(task.title, body, { labels: [], staged });
-    const issueUrl = staged ? null : (issue.url ?? null);
-    const issueNumber = staged ? null : (issue.number ?? null);
+    if (staged) {
+      // STAGED PREVIEW (create chain). A live `put --staged` proved there is NO
+      // real issue in staged mode, so the downstream ops cannot operate on it:
+      // addIssueToBoard/setStage/setLabels all need a real url/itemId/number that
+      // only exists after a committed createIssue. We therefore preview the
+      // create-chain FROM THE INPUTS and call only createIssue (its stagedGuard
+      // previews correctly and validates the create is well-formed). We do NOT
+      // call addIssueToBoard/setStage/setLabels on a nonexistent issue.
+      await engine.createIssue(task.title, body, { labels: [], staged });
+      created.push({ number: null, url: null, owner, lane, title: task.title });
+      continue;
+    }
 
-    const item = await engine.addIssueToBoard(issueUrl, { staged });
-    const itemId = staged ? null : (item.itemId ?? null);
+    // COMMIT PATH — EXACT order: create -> add -> stage -> label, each on the
+    // real returned url/itemId/number from a committed createIssue.
+    const issue = await engine.createIssue(task.title, body, { labels: [] });
+    const issueUrl = issue.url ?? null;
+    const issueNumber = issue.number ?? null;
 
-    await engine.setStage(itemId, lane, { staged });
-    await engine.setLabels(issueNumber, [label], { staged });
+    const item = await engine.addIssueToBoard(issueUrl, {});
+    const itemId = item.itemId ?? null;
+
+    await engine.setStage(itemId, lane, {});
+    await engine.setLabels(issueNumber, [label], {});
 
     created.push({ number: issueNumber, url: issueUrl, owner, lane, title: task.title });
   }
@@ -280,22 +289,29 @@ export async function followup(parent, child, ctx) {
   const lane = defaultLane(config);
   const label = config.routing[owner];
 
-  // Same chain + staged discipline as put: every op called with { staged }; the
-  // preview is built from INPUTS (title, owner), not the id-less staged returns.
-  const issue = await engine.createIssue(child.title, body, { labels: [], staged });
-  const issueUrl = staged ? null : (issue.url ?? null);
-  const number = staged ? null : (issue.number ?? null);
+  if (staged) {
+    // STAGED PREVIEW (create chain) — same fix as put: there is NO real issue in
+    // staged mode, so we preview the create-chain from the INPUTS and call only
+    // createIssue (its stagedGuard previews + validates). We do NOT chain
+    // addIssueToBoard/setStage/setLabels on a nonexistent issue.
+    await engine.createIssue(child.title, body, { labels: [], staged });
+    const say = `Would file follow-up '${child.title}' (Claude's queue).`;
+    return { created: { number: null, url: null, owner }, committed: false, say };
+  }
 
-  const item = await engine.addIssueToBoard(issueUrl, { staged });
-  const itemId = staged ? null : (item.itemId ?? null);
+  // COMMIT PATH — same chain as put on the real returned url/itemId/number.
+  const issue = await engine.createIssue(child.title, body, { labels: [] });
+  const issueUrl = issue.url ?? null;
+  const number = issue.number ?? null;
 
-  await engine.setStage(itemId, lane, { staged });
-  await engine.setLabels(number, [label], { staged });
+  const item = await engine.addIssueToBoard(issueUrl, {});
+  const itemId = item.itemId ?? null;
 
-  const say = staged
-    ? `Would file follow-up '${child.title}' (Claude's queue).`
-    : `Filed follow-up #${number} '${child.title}'.`;
-  return { created: { number, url: issueUrl, owner }, committed: !staged, say };
+  await engine.setStage(itemId, lane, {});
+  await engine.setLabels(number, [label], {});
+
+  const say = `Filed follow-up #${number} '${child.title}'.`;
+  return { created: { number, url: issueUrl, owner }, committed: true, say };
 }
 
 /**

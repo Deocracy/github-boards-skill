@@ -18,25 +18,26 @@ test('put files a human task: create -> add -> stage -> label, report-back', asy
   assert.equal(r.committed, true);
 });
 
-test('put in staged mode previews without committing and says "Would file"', async () => {
+test('put in staged mode previews via createIssue ONLY (no downstream ops on a null issue) and says "Would file"', async () => {
+  // Corrected contract (a live `put --staged` caught the old one): in staged
+  // mode there is NO real issue, so put must NOT chain addIssueToBoard/setStage/
+  // setLabels on a nonexistent issue (the real engine null-derefs on issueUrl.match
+  // before its stagedGuard). It previews by calling ONLY createIssue per task.
   const engine = makeMockEngine({
     createIssue: () => ({ staged: true, wouldRun: { op: 'gh issue create' } }),
-    addIssueToBoard: () => ({ staged: true, wouldRun: { op: 'addProjectV2ItemById' } }),
-    setStage: () => ({ staged: true, wouldRun: { op: 'updateProjectV2ItemFieldValue' } }),
-    setLabels: () => ({ staged: true, wouldRun: { op: 'gh issue edit --add-label' } }),
   });
   const ctx = { engine, config: { routing: { agent: 'agent:go', human: 'needs-claude' }, stageOptions: { Intake: 'o1' } }, staged: true };
   const r = await put([{ title: 'Submit form', owner: 'human', lane: 'Intake' }], ctx);
 
-  // The engine ops are STILL called in staged mode (the engine returns a plan, writes nothing)
+  // ONLY createIssue is called in staged mode — the downstream ops are skipped.
   const ops = engine.calls.map((c) => c.op);
-  assert.deepEqual(ops, ['createIssue', 'addIssueToBoard', 'setStage', 'setLabels']);
+  assert.deepEqual(ops, ['createIssue']);
+  assert.ok(!ops.includes('addIssueToBoard'), 'must NOT call addIssueToBoard on a nonexistent staged issue');
+  assert.ok(!ops.includes('setStage'), 'must NOT call setStage on a nonexistent staged issue');
+  assert.ok(!ops.includes('setLabels'), 'must NOT call setLabels on a nonexistent staged issue');
 
-  // Each write op was passed a staged flag.
-  for (const call of engine.calls) {
-    const opts = call.args.at(-1);
-    assert.equal(opts?.staged, true, `${call.op} should be passed { staged:true }`);
-  }
+  // createIssue was passed { staged:true } so the engine previews + validates.
+  assert.equal(engine.calls[0].args.at(-1)?.staged, true, 'createIssue should be passed { staged:true }');
 
   assert.equal(r.committed, false);
   assert.match(r.say, /Would file/);
