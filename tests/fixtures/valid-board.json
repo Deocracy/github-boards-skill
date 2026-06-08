@@ -1,0 +1,17 @@
+{
+  "owner": "deocracy",
+  "ownerType": "organization",
+  "projectNumber": 23,
+  "projectId": "PVT_test123",
+  "repo": "deocracy/github-boards-skill",
+  "stageFieldId": "PVTSSF_test456",
+  "stageOptions": {
+    "Ideas": "opt-ideas",
+    "Researching": "opt-research",
+    "Building": "opt-build",
+    "Review": "opt-review",
+    "Shipped": "opt-shipped",
+    "Rejected (learnings kept)": "opt-rejected"
+  },
+  "preset": "build"
+}

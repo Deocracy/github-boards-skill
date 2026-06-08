@@ -1,0 +1,11 @@
+{
+  "owner": "deocracy",
+  "ownerType": "organization",
+  "projectNumber": 23,
+  "repo": "deocracy/github-boards-skill",
+  "stageFieldId": "PVTSSF_test456",
+  "stageOptions": {
+    "Ideas": "opt1"
+  },
+  "preset": "build"
+}
