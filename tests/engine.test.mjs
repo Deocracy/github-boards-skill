@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   loadConfig, getStageField, listItems,
-  createIssue, addIssueToBoard, setLabels, comment, setStage,
+  createIssue, addIssueToBoard, setLabels, removeLabels, comment, setStage,
   capabilities, resolveStageOption, diffItems, Refusal,
 } from '../scripts/board.mjs';
 
@@ -105,6 +105,19 @@ test('staged set-labels is previewable and writes nothing', () => {
   assert.equal(res.staged, true);
   assert.equal(res.wouldRun.op, 'gh issue edit --add-label');
   assert.deepEqual(res.wouldRun.labels, ['blocked']);
+});
+
+test('staged remove-labels is previewable and writes nothing', () => {
+  const res = removeLabels(cfg(), stagedFlags, 7, 'blocked');
+  assert.equal(res.staged, true);
+  assert.equal(res.wouldRun.op, 'gh issue edit --remove-label');
+  assert.deepEqual(res.wouldRun.labels, ['blocked']);
+  assert.equal(res.number, undefined); // nothing was written
+});
+
+test('remove-labels REFUSES a non-numeric issue number (gh option-injection guard)', () => {
+  const r = refused(() => removeLabels(cfg(), stagedFlags, '--oops', 'blocked'));
+  assert.equal(r.refused, true);
 });
 
 test('staged comment is previewable and writes nothing', () => {

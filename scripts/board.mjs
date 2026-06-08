@@ -396,6 +396,22 @@ function setLabels(cfg, flags, number, labelsCsv) {
   });
 }
 
+// removeLabels — removeLabelsFromLabelable via `gh issue edit --remove-label`.
+// Additive sibling of setLabels (labels are Issue props, NOT project fields).
+// Routed through the SAME stagedGuard, so a staged preview writes nothing.
+function removeLabels(cfg, flags, number, labelsCsv) {
+  const num = Number(number);
+  if (!Number.isInteger(num)) throw new Refusal(`remove-labels: <number> must be an issue number, got "${number}"`);
+  const labels = labelsCsv.split(",").map((s) => s.trim()).filter(Boolean);
+  const plan = { op: "gh issue edit --remove-label", repo: cfg.repo, number: num, labels };
+  return stagedGuard(flags, plan, () => {
+    const args = ["issue", "edit", String(num), "--repo", cfg.repo];
+    for (const l of labels) args.push("--remove-label", l);
+    sh(args);
+    return { number: num, removedLabels: labels };
+  });
+}
+
 // comment — identity-aware (Invariant 5). asIdentity=pat (default) fine;
 // asIdentity=actions WARNS the comment is inert for the 0.2 re-trigger loop.
 function comment(cfg, flags, number, body) {
@@ -722,6 +738,7 @@ MAKE:
   create-issue <title> <body> [--labels a,b]   REAL Issue (never draft) -> id+number+url
   add-to-board <issueUrl>                       upsert onto board -> itemId
   set-labels <number> <a,b>                     addLabelsToLabelable
+  remove-labels <number> <a,b>                  removeLabelsFromLabelable
   comment <number> <body> [--identity pat|actions]   identity-aware comment
 
 REGULATE:
@@ -787,6 +804,12 @@ function main() {
       print(flags, setLabels(cfg, flags, number, labels));
       break;
     }
+    case "remove-labels": {
+      const number = positional[1], labels = positional[2];
+      if (!number || !labels) throw new Refusal("usage: remove-labels <number> <a,b>");
+      print(flags, removeLabels(cfg, flags, number, labels));
+      break;
+    }
     case "comment": {
       const number = positional[1], body = positional[2];
       if (!number || body === undefined) throw new Refusal("usage: comment <number> <body> [--identity pat|actions]");
@@ -828,6 +851,6 @@ if (invokedDirectly) {
 // export for in-process testing
 export {
   loadConfig, getStageField, listItems, getIssue, snapshot,
-  createIssue, addIssueToBoard, setLabels, comment, setStage,
+  createIssue, addIssueToBoard, setLabels, removeLabels, comment, setStage,
   capabilities, resolveStageOption, runDoctor, diffItems, runWatch, Refusal,
 };

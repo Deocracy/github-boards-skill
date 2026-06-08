@@ -10,6 +10,7 @@ export function makeMockEngine(overrides = {}) {
     createIssue:    rec('createIssue'),
     addIssueToBoard:rec('addIssueToBoard'),
     setLabels:      rec('setLabels'),
+    removeLabels:   rec('removeLabels'),
     comment:        rec('comment'),
     setStage:       rec('setStage'),
   };
