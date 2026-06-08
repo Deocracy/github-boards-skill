@@ -1,0 +1,18 @@
+{
+  "owner": "deocracy",
+  "ownerType": "organization",
+  "projectNumber": 23,
+  "projectId": "PVT_replace_with_your_project_node_id",
+  "repo": "deocracy/github-boards-skill",
+  "stageFieldId": "PVTSSF_replace_with_your_stage_field_id",
+  "stageOptions": {
+    "Ideas": "replace_with_option_id",
+    "Building": "replace_with_option_id",
+    "Shipped": "replace_with_option_id"
+  },
+  "preset": "build",
+  "routing": {
+    "agent": "agent:go",
+    "human": "needs-claude"
+  }
+}
