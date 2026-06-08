@@ -12,7 +12,6 @@
     { "name": "Awarded", "terminal": true },
     { "name": "Rejected (learnings kept)", "terminal": true }
   ],
-  "owner": { "agent": "agent:go", "human": "needs-claude" },
   "customFields": [
     { "name": "Deadline", "type": "date", "appliesTo": "card" },
     { "name": "Amount", "type": "number", "appliesTo": "card" }

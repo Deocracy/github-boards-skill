@@ -23,12 +23,13 @@ Three boards can each use a different preset, or all share one — no code chang
     { "name": "Submitted", "terminal": false },
     { "name": "Awarded",   "terminal": true }
   ],
-  "owner": { "agent": "agent:go", "human": "needs-claude" },
   "customFields": [                 // optional Projects v2 fields this format needs
     { "name": "Deadline", "type": "date", "appliesTo": "card" }
   ]
 }
 ```
+
+> **Routing labels live in `board.json`, not in a preset.** The 🤖/🧍 labels (`agent:go` / `needs-claude`) are universal — they're the same for a build board or a grants board — so they're set once under `board.json`'s `routing` key (with a sensible default), not repeated per preset. A preset describes *lane shape* only.
 
 ## Make your own format (per project)
 

@@ -10,6 +10,5 @@
     { "name": "Shipped", "terminal": true },
     { "name": "Rejected (learnings kept)", "terminal": true }
   ],
-  "owner": { "agent": "agent:go", "human": "needs-claude" },
   "customFields": []
 }
