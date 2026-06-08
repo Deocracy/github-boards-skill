@@ -103,6 +103,12 @@ This skill is designed to be **invoked by other skills**. Any skill can say *"us
 
 The skill keeps a small, delete-safe `.github-boards/state.json` (git-ignored) recording what the board looked like last time, so it can tell you *what changed* since you were last here. **The board itself is always the source of truth**; the state file is just a "where I left off" marker.
 
+## Known limitations (v1)
+
+- **Staged previews:** in staged mode nothing is written to the board, but a fully *offline* preview of a multi-step write is not possible — the engine performs validation reads before the write guard. Previews are accurate about intent.
+- **`reshape`:** produces a diff + a human checklist of the lanes to add/rename in the GitHub UI; it does not auto-modify the board's Stage options (GitHub API limitation). The board *view* grouping (group-by Stage) is UI-only regardless — no API can set it.
+- **Hooks:** SessionStart context injection, `$ARGUMENTS` expansion, and the PreToolUse auto-allow are verified against a live session in integration. On some setups, plugin SessionStart context injection may not surface (a documented upstream issue) — the skill still works fully via the `/board` command and direct calls.
+
 ## Agnosticism
 
 v1 targets **Claude Code**. The board rules live in one vendor-neutral instruction body, and the verb contract is built so an **MCP server** (for Codex / Cursor / CI / other agents) is a thin add-on later — see the [ROADMAP](ROADMAP.md).

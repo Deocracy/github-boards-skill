@@ -49,7 +49,7 @@ Marked by labels already understood by the board: `agent:go` = Claude-actionable
 
 ## Configuration
 
-`board.json` binds to a board (`projectId`, `stageFieldId`, `lanes` map, `owner` labels). Lanes are **read from config** — a software board and a grants board can have different columns with no code change. `doctor` discovers the IDs.
+`board.json` binds to a board via `projectId`, `stageFieldId`, the `stageOptions` (lane label → option-id) map, `preset` (lane-shape template), and `routing` labels (`agent`/`human`). Lanes are **read from config** — a software board and a grants board can have different columns with no code change. `doctor` discovers the IDs.
 
 ## Being called by another skill
 

@@ -7,7 +7,6 @@
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
 
 const STATE_DIR = '.github-boards';
 const STATE_FILE = 'state.json';

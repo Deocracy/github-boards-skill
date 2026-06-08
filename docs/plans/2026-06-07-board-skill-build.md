@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Build status (updated 2026-06-08)
+
+Phases 0–5 are **COMPLETE** on branch `build/v0.1` (115 tests passing; every chunk reviewed). Phase 6 (live-board integration + publish) is pending. Micro-tasks were executed as coherent chunks: engine port (Tasks 1.1–1.3 together), config/presets/doctor (Tasks 2.1–2.3 together), and verbs in three waves (3a: put/queue/move; 3b: route/followup; 3c: reshape/summary).
+
+---
+
 **Goal:** Build the executable logic for a standalone, self-contained Claude Code skill that reads and edits a GitHub Projects v2 Kanban board in natural language, routes 🤖/🧍 work, previews every write, and reports back.
 
 **Architecture:** Two layers in one repo. A **ported engine** (`scripts/board.mjs`, from GCA's 38/38-tested `board-connection`) does the `gh`/GraphQL plumbing. A **new verb layer** (`scripts/board-manager.mjs`) composes the engine into conversational verbs and adds owner-routing, "what's on my plate", last-seen memory, and the report-back. The skill (`SKILL.md`), the `/board` command, and hooks wire it into Claude Code.
@@ -116,7 +122,7 @@ The engine is GCA's hardened `board-connection`. **Port it, do not rewrite it** 
 
 - [ ] **Step 1:** Copy `board.mjs` verbatim into `scripts/board.mjs`.
 - [ ] **Step 2:** Copy the engine's test suite into `tests/engine.test.mjs`.
-- [ ] **Step 3: Run** the engine tests — `npm test` — Expected: the ported engine tests pass unchanged (they mock `gh`).
+- [ ] **Step 3: Run** the engine tests — `npm test` — Expected: the ported engine tests pass. Note: the GCA source `run-tests.mjs` is a LIVE end-to-end harness that makes real mutations on a board. This repo ports only the engine's **board-free assertions** — pure functions, fail-closed Refusal paths, and staged dry-runs. LIVE behavior (real board mutations) is covered in Phase 6 integration.
 - [ ] **Step 4: Commit** — `git commit -am "feat: port board-connection engine (ghCli adapter) verbatim"`
 
 ### Task 1.2: Add a function-export surface (for verb-layer composition + mocking)
@@ -225,7 +231,8 @@ queue(owner, ctx)      // 'agent'|'human' → listItems + filter on routing[owne
 move(card, lane, ctx)  // setStage; lane 'reject' → Rejected lane + comment; returns {moved, say}
 route(card, owner, ctx)// setLabels(flip routing); owner 'human' → keep claimed + comment(@mention); returns {routed, say}
 followup(parent, child, ctx) // createIssue(sub-issue body links parent)→addIssueToBoard; returns {created, say}
-reshape(presetName, ctx)     // set Stage options to preset lanes (engine field op) + print UI checklist; returns {applied, checklist, say}
+reshape(presetName, ctx)     // produces a diff + human checklist of lanes to add/rename in the GitHub UI; returns {checklist, say}
+                             // NOTE: auto-applying Stage options was deferred — GitHub's API can't reliably modify an existing single-select field's options
 summary(ctx)           // listItems + diff vs state; returns {changes, queues, say}
 ```
 

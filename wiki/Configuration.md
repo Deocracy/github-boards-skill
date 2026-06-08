@@ -4,11 +4,19 @@ A `board.json` binds the skill to your board. Run `doctor` to discover the IDs.
 
 ```jsonc
 {
-  "projectId":    "PVT_…",        // Project v2 node id
-  "stageFieldId": "PVTSSF_…",     // the Stage single-select field id
-  "lanes":  { "Ideas": "…optionId", "Building": "…optionId" },  // lane name → option id
-  "owner":  { "agent": "agent:go", "human": "needs-claude" },   // the 🤖/🧍 routing labels
-  "preset": "build"               // or "grants" — selects the lane shape
+  "owner":         "deocracy",            // repo/project owner login (org or user)
+  "ownerType":     "organization",        // "organization" or "user"
+  "projectNumber": 23,                    // the project number (visible in the URL)
+  "projectId":     "PVT_…",              // Project v2 node id (found by doctor)
+  "repo":          "deocracy/your-repo",  // owner/repo slug
+  "stageFieldId":  "PVTSSF_…",           // the Stage single-select field id
+  "stageOptions":  {                      // lane label → option id map
+    "Ideas":    "…optionId",
+    "Building": "…optionId",
+    "Shipped":  "…optionId"
+  },
+  "preset":   "build",                    // or "grants" — selects the lane shape template
+  "routing":  { "agent": "agent:go", "human": "needs-claude" }  // 🤖/🧍 labels (optional, these are the defaults)
 }
 ```
 
