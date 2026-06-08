@@ -135,30 +135,163 @@ export async function put(tasks, ctx) {
     // EXACT order: create -> add -> stage -> label. Each threads { staged }.
     //
     // HARD RULE: in staged mode we STILL call every op (the engine returns a
-    // `{ staged, wouldRun }` plan and writes nothing). But a staged return carries
-    // NO real url/number/itemId — so we substitute legible sentinels to keep the
-    // chain calling downstream ops instead of feeding them `undefined`. (The mock
-    // engine ignores these args; the real engine, in staged mode, still previews.)
+    // `{ staged, wouldRun }` plan and writes nothing) to honor Invariant 4 and
+    // exercise the engine's validation. But a staged return carries NO real
+    // url/number/itemId. So the human-facing preview is built from the INPUTS
+    // (title, lane, owner), NOT from these id-less staged returns — keeping the
+    // chain flowing on clean placeholders rather than `undefined`, and the `say`
+    // legible (no `#null`, no sentinel strings).
     const issue = await engine.createIssue(task.title, body, { labels: [], staged });
-    const issueUrl = issue.url ?? '(staged: url pending)';
-    const issueNumber = issue.number ?? null;
+    const issueUrl = staged ? null : (issue.url ?? null);
+    const issueNumber = staged ? null : (issue.number ?? null);
 
     const item = await engine.addIssueToBoard(issueUrl, { staged });
-    const itemId = item.itemId ?? '(staged: itemId pending)';
+    const itemId = staged ? null : (item.itemId ?? null);
 
     await engine.setStage(itemId, lane, { staged });
     await engine.setLabels(issueNumber, [label], { staged });
 
-    created.push({ number: issueNumber, url: issueUrl, owner, lane });
+    created.push({ number: issueNumber, url: issueUrl, owner, lane, title: task.title });
   }
 
   const humanCount = created.filter((c) => c.owner === 'human').length;
   const agentCount = created.filter((c) => c.owner === 'agent').length;
   const n = created.length;
-  const verb = staged ? 'Would file' : 'Filed';
-  const say = `${verb} ${n} card(s). ${sayQueues(humanCount, agentCount)}`;
+  let say;
+  if (staged) {
+    // Preview lists intended cards by title/lane/owner (READS + INPUTS only).
+    const list = created.map((c) => `'${c.title}' → ${c.lane} (${c.owner})`).join('; ');
+    say = `Would file ${n} card(s): ${list}. ${sayQueues(humanCount, agentCount)}`;
+  } else {
+    say = `Filed ${n} card(s). ${sayQueues(humanCount, agentCount)}`;
+  }
 
   return { committed: !staged, created, say };
+}
+
+/**
+ * move(card, lane, ctx) — "move card X to <lane>".
+ * Resolve the card's itemId (a READ that works in staged mode), then setStage.
+ * @param {number} card  issue number
+ * @param {string} lane  target lane name
+ * @param {object} ctx   { engine, config, staged }
+ * @returns {Promise<{moved:{card,lane,itemId}, committed:boolean, say:string}>}
+ */
+export async function move(card, lane, ctx) {
+  const { engine, staged } = ctx;
+  const itemId = await resolveItemId(engine, card); // READ — works in staged mode
+  await engine.setStage(itemId, lane, { staged });
+  // Staged preview reads from INPUTS + READS (card, lane, itemId), never the
+  // id-less staged return of setStage.
+  const say = staged
+    ? `Would move #${card} → ${lane}.`
+    : `Moved #${card} → ${lane}.`;
+  return { moved: { card, lane, itemId }, committed: !staged, say };
+}
+
+/**
+ * reject(card, learnings, ctx) — "reject with learnings".
+ * Move the card to the terminal reject lane (terminal:true, name ~ /reject/i)
+ * and record the learnings as a comment.
+ * @param {number} card  issue number
+ * @param {string} [learnings]
+ * @param {object} ctx   { engine, config, staged }
+ * @returns {Promise<{rejected:{card,lane}, committed:boolean, say:string}>}
+ */
+export async function reject(card, learnings, ctx) {
+  const { engine, config, staged } = ctx;
+  const lanes = config?.preset?.lanes;
+  if (!Array.isArray(lanes)) {
+    throw new Error('reject: config.preset.lanes is missing');
+  }
+  const rejectLane = lanes.find((l) => l.terminal && /reject/i.test(l.name));
+  if (!rejectLane) {
+    throw new Error(
+      'reject: no terminal lane matching /reject/i found in config.preset.lanes ' +
+      `(${lanes.map((l) => l.name).join(', ')}). Add a terminal "Rejected" lane.`
+    );
+  }
+  const lane = rejectLane.name;
+  const itemId = await resolveItemId(engine, card); // READ — works in staged mode
+  const note = learnings || 'Rejected with learnings.';
+  await engine.setStage(itemId, lane, { staged });
+  await engine.comment(card, note, { staged });
+  // Preview from INPUTS + READS (card, lane), not the id-less staged returns.
+  const say = staged
+    ? `Would reject #${card} (→ ${lane}) with learnings.`
+    : `Rejected #${card} → ${lane}; learnings recorded.`;
+  return { rejected: { card, lane }, committed: !staged, say };
+}
+
+/**
+ * route(card, owner, ctx) — "this needs me" (human) / "hand it to Claude" (agent).
+ * Swap the routing label (add the new owner's label, remove the other's). A
+ * human-routed card stays claimed (its STAGE is NOT moved) and is escalated via
+ * a comment. An agent-routed card is relabeled only.
+ * @param {number} card  issue number
+ * @param {'agent'|'human'} owner
+ * @param {object} ctx   { engine, config, staged }
+ * @returns {Promise<{routed:{card,owner}, committed:boolean, say:string}>}
+ */
+export async function route(card, owner, ctx) {
+  if (owner !== 'agent' && owner !== 'human') {
+    throw new Error(`route: owner must be 'agent' or 'human', got ${JSON.stringify(owner)}`);
+  }
+  const { engine, config, staged } = ctx;
+  const newLabel = config.routing[owner];
+  const oldLabel = config.routing[owner === 'agent' ? 'human' : 'agent'];
+
+  await engine.setLabels(card, [newLabel], { staged });
+  await engine.removeLabels(card, [oldLabel], { staged });
+  if (owner === 'human') {
+    // Invariant: a human-routed card stays claimed (no stage move) and is
+    // escalated via a comment.
+    const escalationNote =
+      '🧍 This card needs a human.' + (config.escalateTo ? ' @' + config.escalateTo : '');
+    await engine.comment(card, escalationNote, { staged });
+  }
+  // Preview from INPUTS only (card, owner) — staged label/comment ops are id-less.
+  const say = staged
+    ? `Would route #${card} → ${owner}${owner === 'human' ? ' and flag it for you' : ''}.`
+    : `Routed #${card} → ${owner}.`;
+  return { routed: { card, owner }, committed: !staged, say };
+}
+
+/**
+ * followup(parent, child, ctx) — "Claude found more work".
+ * File a new child card linked to its parent, following put's create -> add ->
+ * stage -> label chain. Defaults owner to 'agent' (Claude's queue).
+ * @param {number} parent  parent issue number
+ * @param {{title:string, body?:string, owner?:'agent'|'human'}} child
+ * @param {object} ctx   { engine, config, staged }
+ * @returns {Promise<{created:{number,url,owner}, committed:boolean, say:string}>}
+ */
+export async function followup(parent, child, ctx) {
+  if (!child || !child.title) {
+    throw new Error('followup: child requires a title');
+  }
+  const { engine, config, staged } = ctx;
+  const owner = child.owner || 'agent';
+  const body = (child.body || '') + ('\n\nFollow-up to #' + parent + '.');
+  const lane = defaultLane(config);
+  const label = config.routing[owner];
+
+  // Same chain + staged discipline as put: every op called with { staged }; the
+  // preview is built from INPUTS (title, owner), not the id-less staged returns.
+  const issue = await engine.createIssue(child.title, body, { labels: [], staged });
+  const issueUrl = staged ? null : (issue.url ?? null);
+  const number = staged ? null : (issue.number ?? null);
+
+  const item = await engine.addIssueToBoard(issueUrl, { staged });
+  const itemId = staged ? null : (item.itemId ?? null);
+
+  await engine.setStage(itemId, lane, { staged });
+  await engine.setLabels(number, [label], { staged });
+
+  const say = staged
+    ? `Would file follow-up '${child.title}' (Claude's queue).`
+    : `Filed follow-up #${number} '${child.title}'.`;
+  return { created: { number, url: issueUrl, owner }, committed: !staged, say };
 }
 
 // ===========================================================================
@@ -212,6 +345,9 @@ function makeRealEngine(eng, cfg) {
     setLabels: (issueNumber, labels, opts = {}) =>
       // DI hands an array; board.mjs's setLabels takes a CSV positional.
       eng.setLabels(cfg, flagsFor(opts), issueNumber, (labels || []).join(',')),
+    removeLabels: (issueNumber, labels, opts = {}) =>
+      // DI hands an array; board.mjs's removeLabels takes a CSV positional.
+      eng.removeLabels(cfg, flagsFor(opts), issueNumber, (labels || []).join(',')),
     comment: (issueNumber, body, opts = {}) =>
       eng.comment(cfg, flagsFor(opts), issueNumber, body),
   };
@@ -240,6 +376,10 @@ async function cli() {
 
   queue <agent|human>                 what's on a queue (read-only)
   put "<title>" [owner] [lane]        file one card (create->add->stage->label)
+  move <card#> <lane>                 move a card to a lane
+  reject <card#> "<learnings>"        reject a card -> terminal reject lane + learnings
+  route <card#> <agent|human>         swap routing label (human also escalates)
+  followup <parent#> "<title>" [owner]  file a child card linked to its parent
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -273,6 +413,30 @@ async function cli() {
       const [title, owner, lane] = rest;
       if (!title) throw new Error('usage: put "<title>" [owner] [lane]');
       result = await put([{ title, owner, lane }], ctx);
+      break;
+    }
+    case 'move': {
+      const [card, lane] = rest;
+      if (!card || !lane) throw new Error('usage: move <card#> <lane>');
+      result = await move(Number(card), lane, ctx);
+      break;
+    }
+    case 'reject': {
+      const [card, learnings] = rest;
+      if (!card) throw new Error('usage: reject <card#> "<learnings>"');
+      result = await reject(Number(card), learnings, ctx);
+      break;
+    }
+    case 'route': {
+      const [card, owner] = rest;
+      if (!card || !owner) throw new Error('usage: route <card#> <agent|human>');
+      result = await route(Number(card), owner, ctx);
+      break;
+    }
+    case 'followup': {
+      const [parent, title, owner] = rest;
+      if (!parent || !title) throw new Error('usage: followup <parent#> "<title>" [owner]');
+      result = await followup(Number(parent), { title, owner }, ctx);
       break;
     }
     default:
