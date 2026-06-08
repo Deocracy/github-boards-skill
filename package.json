@@ -1,0 +1,29 @@
+{
+  "name": "github-boards-skill",
+  "version": "0.1.0",
+  "description": "Conversational, composable Claude Code skill to read and edit a GitHub Projects v2 Kanban board — natural-language board driving with agent/human task routing, staged previews, and report-back.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Deocracy Institute",
+  "homepage": "https://github.com/deocracy/github-boards-skill",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deocracy/github-boards-skill.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "doctor": "node scripts/board.mjs doctor",
+    "test": "node --test"
+  },
+  "keywords": [
+    "claude-code",
+    "claude-skill",
+    "github-projects",
+    "kanban",
+    "gh-cli",
+    "agile",
+    "task-management"
+  ]
+}

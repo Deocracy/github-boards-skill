@@ -1,0 +1,15 @@
+{
+  "name": "github-boards-skill",
+  "owner": {
+    "name": "Deocracy Institute",
+    "url": "https://github.com/deocracy"
+  },
+  "plugins": [
+    {
+      "name": "github-boards",
+      "source": "./",
+      "description": "Conversational GitHub Projects v2 Kanban board skill — natural-language board driving with agent/human routing, staged previews, and report-back.",
+      "version": "0.1.0"
+    }
+  ]
+}

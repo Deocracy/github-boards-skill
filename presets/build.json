@@ -1,0 +1,15 @@
+{
+  "name": "build",
+  "kind": "software",
+  "description": "Software build flow. The default preset.",
+  "lanes": [
+    { "name": "Ideas", "terminal": false },
+    { "name": "Researching", "terminal": false },
+    { "name": "Building", "terminal": false },
+    { "name": "Review", "terminal": false },
+    { "name": "Shipped", "terminal": true },
+    { "name": "Rejected (learnings kept)", "terminal": true }
+  ],
+  "owner": { "agent": "agent:go", "human": "needs-claude" },
+  "customFields": []
+}

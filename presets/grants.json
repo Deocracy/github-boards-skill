@@ -1,0 +1,20 @@
+{
+  "name": "grants",
+  "kind": "non-software",
+  "description": "Grant / paperwork lifecycle. Most cards are human-actionable (draft, sign, submit, request); Claude assists with drafting and research.",
+  "lanes": [
+    { "name": "Intake", "terminal": false },
+    { "name": "Drafting", "terminal": false },
+    { "name": "Needs-info", "terminal": false },
+    { "name": "Ready-to-submit", "terminal": false },
+    { "name": "Submitted", "terminal": false },
+    { "name": "Awaiting-decision", "terminal": false },
+    { "name": "Awarded", "terminal": true },
+    { "name": "Rejected (learnings kept)", "terminal": true }
+  ],
+  "owner": { "agent": "agent:go", "human": "needs-claude" },
+  "customFields": [
+    { "name": "Deadline", "type": "date", "appliesTo": "card" },
+    { "name": "Amount", "type": "number", "appliesTo": "card" }
+  ]
+}

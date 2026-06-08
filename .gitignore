@@ -1,0 +1,18 @@
+# Local last-seen board state (delete-safe; board is the source of truth)
+.github-boards/
+
+# Secrets — never commit tokens; auth is via `gh auth login`
+.env
+*.local
+
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
