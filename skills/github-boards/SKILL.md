@@ -8,7 +8,7 @@ allowed-tools: "Bash, Read, Write"
 
 Drive a GitHub Projects (v2) Kanban board for the user in plain language, and let other skills record work onto it. This instruction body is **vendor-neutral** (it must mirror to `AGENTS.md` with no rewrite) — all board logic lives in the bundled script, not in this prose.
 
-> **IMPLEMENTATION STATUS (pre-release):** the executable engine (`scripts/board.mjs`) and verb layer (`scripts/board-manager.mjs`) are being built per `docs/SPEC-BOARD-MANAGER.md` and `ROADMAP.md`. Until then, follow these rules but expect the script commands below to be wired up during the build.
+> **STATUS:** the engine (`scripts/board.mjs`) and verb layer (`scripts/board-manager.mjs`) are implemented and tested. Before first use, configure `board.json` — run `node "<skill-dir>/scripts/board.mjs" doctor` for the setup checklist.
 
 ## How to run it
 

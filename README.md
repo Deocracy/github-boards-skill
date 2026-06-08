@@ -4,7 +4,7 @@
 
 **A standalone, self-contained, MIT-licensed [Claude Code](https://code.claude.com) skill.** It reads and edits a GitHub Projects v2 board, routes work as 🤖 agent-actionable vs 🧍 human-actionable, previews every change before writing, and reports back. It is **composable**: any other skill (deep-research, grant work, your own) can call it to drop tasks onto the board.
 
-> **Status: pre-release / design-stage.** The design is locked (see [docs/SPEC-BOARD-MANAGER.md](docs/SPEC-BOARD-MANAGER.md)) and this repo is the publishable shell. The executable script (`scripts/board.mjs`) is being built per the [ROADMAP](ROADMAP.md). This README documents the intended v1.
+> **Status: v0.1 built, pre-publish.** The full skill is implemented and tested (115 tests). Final live-board integration and the first publish are the remaining steps — see [ROADMAP](ROADMAP.md).
 
 ---
 
@@ -64,7 +64,7 @@ git clone https://github.com/deocracy/github-boards-skill ~/.claude/skills-src/g
 # then copy skills/github-boards/ into ~/.claude/skills/
 ```
 
-> Exact GitHub org/repo slug is TBD before first publish — see [ROADMAP](ROADMAP.md).
+> These install commands work once the repo is published at `deocracy/github-boards-skill` — see Status above.
 
 ## One-time board setup (the human step)
 
@@ -82,10 +82,15 @@ A `board.json` file binds the skill to your board:
 
 ```jsonc
 {
-  "projectId": "PVT_…",          // your Project v2 node id
-  "stageFieldId": "PVTSSF_…",    // the Stage single-select field id
-  "lanes": { "Ideas": "…optionId", "Building": "…optionId", … },
-  "owner": { "agent": "agent:go", "human": "needs-claude" }  // the routing labels
+  "owner":         "deocracy",            // repo/project owner login (org or user)
+  "ownerType":     "organization",        // "organization" or "user"
+  "projectNumber": 23,                    // the project number (from the URL)
+  "projectId":     "PVT_…",              // Project v2 node id (found by doctor)
+  "repo":          "deocracy/your-repo",  // owner/repo slug
+  "stageFieldId":  "PVTSSF_…",           // the Stage single-select field id
+  "stageOptions":  { "Ideas": "…optionId", "Building": "…optionId" },  // lane label → option id
+  "preset":        "build",               // or "grants" — the lane-shape template
+  "routing":       { "agent": "agent:go", "human": "needs-claude" }    // 🤖/🧍 labels (optional; these are the defaults)
 }
 ```
 
