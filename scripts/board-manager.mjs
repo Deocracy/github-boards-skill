@@ -20,7 +20,10 @@
 //   config = { projectId, stageFieldId, stageOptions, routing:{agent,human}, preset:{name,kind,lanes:[{name,terminal}],...} }
 
 import { pathToFileURL } from 'node:url';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { loadPreset, laneNames } from './lib/presets.mjs';
+import { readState, writeState, diff } from './lib/state.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -337,6 +340,75 @@ export async function reshape(presetName, ctx) {
   return { diff: { missing, extra }, applied: false, checklist, say };
 }
 
+/**
+ * ownerOf — determine who owns a card based on routing labels.
+ * Returns 'agent' | 'human' | null.
+ * @param {string[]} labels
+ * @param {{agent:string, human:string}} routing
+ * @returns {'agent'|'human'|null}
+ */
+function ownerOf(labels, routing) {
+  if ((labels || []).includes(routing.agent)) return 'agent';
+  if ((labels || []).includes(routing.human)) return 'human';
+  return null;
+}
+
+/**
+ * summary(ctx) — last-seen memory snapshot and change report.
+ * Read-only toward the board (only listItems). Writes local state file.
+ * @param {object} ctx  { engine, config, staged, dir? }
+ * @returns {Promise<{changes:{moved,added,removed,rejected}, queues:{human,agent}, say:string}>}
+ */
+export async function summary(ctx) {
+  const { engine, config } = ctx;
+  const dir = ctx.dir || process.cwd();
+
+  // 1. Fetch current board state
+  const { items } = await engine.listItems();
+  const currentMap = {};
+  for (const it of (items || [])) {
+    currentMap[it.issueNumber] = {
+      lane: it.stageLabel,
+      labels: it.labels || [],
+      owner: ownerOf(it.labels, config.routing),
+    };
+  }
+
+  // 2. Load prior state
+  const prev = await readState(dir);
+
+  // 3. Diff
+  const d = diff(prev?.items || {}, currentMap);
+
+  // 4. Rejected = cards that moved into a lane matching /reject/i
+  const rejected = d.moved.filter((m) => /reject/i.test(m.to));
+
+  // 5. Queue counts from current items
+  const values = Object.values(currentMap);
+  const human = values.filter((v) => v.owner === 'human').length;
+  const agent = values.filter((v) => v.owner === 'agent').length;
+
+  // 6. Build say
+  let say;
+  if (prev === null) {
+    say = `First look at the board. ${sayQueues(human, agent)}`;
+  } else {
+    say = `Since last time: ${d.moved.length} moved, ${d.added.length} new, ${rejected.length} rejected. ${sayQueues(human, agent)}`;
+  }
+
+  // 7. Persist state (always — not a board write)
+  const snapshot = { seenAt: new Date().toISOString(), items: currentMap };
+  await writeState(dir, snapshot);
+
+  // 8. teamSync opt-in: also write committed last-sync.json
+  if (config.teamSync === true) {
+    const syncPath = join(dir, 'last-sync.json');
+    await writeFile(syncPath, JSON.stringify(snapshot, null, 2), 'utf8');
+  }
+
+  return { changes: { ...d, rejected }, queues: { human, agent }, say };
+}
+
 // ===========================================================================
 // CLI SHIM + REAL ENGINE ADAPTER
 // ===========================================================================
@@ -424,6 +496,7 @@ async function cli() {
   route <card#> <agent|human>         swap routing label (human also escalates)
   followup <parent#> "<title>" [owner]  file a child card linked to its parent
   reshape <preset>                      diff board Stage options vs preset; print checklist (read-only)
+  summary                               last-seen memory: what changed since last run (read-only toward board)
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -487,6 +560,10 @@ async function cli() {
       const [presetName] = rest;
       if (!presetName) throw new Error('usage: reshape <preset>');
       result = await reshape(presetName, ctx);
+      break;
+    }
+    case 'summary': {
+      result = await summary({ ...ctx, dir: process.cwd() });
       break;
     }
     default:
