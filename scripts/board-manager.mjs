@@ -20,6 +20,7 @@
 //   config = { projectId, stageFieldId, stageOptions, routing:{agent,human}, preset:{name,kind,lanes:[{name,terminal}],...} }
 
 import { pathToFileURL } from 'node:url';
+import { loadPreset, laneNames } from './lib/presets.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -294,6 +295,48 @@ export async function followup(parent, child, ctx) {
   return { created: { number, url: issueUrl, owner }, committed: !staged, say };
 }
 
+/**
+ * reshape(presetName, ctx) — diff the live board's Stage options against a preset
+ * and produce a human checklist of one-time UI steps needed to align them.
+ * READ-ONLY: never calls any write op; `applied` is always false in v1.
+ * @param {string} presetName  Name of a bundled preset (e.g. 'build')
+ * @param {object} ctx         { engine, config, staged } — staged is ignored (read-only)
+ * @returns {Promise<{diff:{missing:string[],extra:string[]}, applied:false, checklist:string[], say:string}>}
+ */
+export async function reshape(presetName, ctx) {
+  const preset = await loadPreset(presetName);
+  const presetLanes = laneNames(preset);
+  const presetSet = new Set(presetLanes);
+
+  const field = await ctx.engine.getStageField();
+  const boardLabels = (field.options || []).map((o) => o.label);
+  const boardSet = new Set(boardLabels);
+
+  const missing = presetLanes.filter((l) => !boardSet.has(l));
+  const extra = boardLabels.filter((l) => !presetSet.has(l));
+
+  const checklist = [];
+  for (const lane of missing) {
+    checklist.push(`Add a \`Stage\` option named "${lane}"`);
+  }
+  if (extra.length > 0) {
+    checklist.push(
+      `Review ${extra.length} extra Stage option(s) not in the preset (rename/remove if intended): ${extra.map((e) => `"${e}"`).join(', ')}`
+    );
+  }
+  checklist.push('Set the board view to group by `Stage`.');
+
+  let say;
+  if (missing.length === 0 && extra.length === 0) {
+    say = `Board already matches the '${presetName}' preset (${presetLanes.length} lanes).`;
+  } else {
+    const extraNote = extra.length > 0 ? `, and review ${extra.length} extra` : '';
+    say = `To match the '${presetName}' preset: add ${missing.length} lane(s)${extraNote}. See the checklist.`;
+  }
+
+  return { diff: { missing, extra }, applied: false, checklist, say };
+}
+
 // ===========================================================================
 // CLI SHIM + REAL ENGINE ADAPTER
 // ===========================================================================
@@ -380,6 +423,7 @@ async function cli() {
   reject <card#> "<learnings>"        reject a card -> terminal reject lane + learnings
   route <card#> <agent|human>         swap routing label (human also escalates)
   followup <parent#> "<title>" [owner]  file a child card linked to its parent
+  reshape <preset>                      diff board Stage options vs preset; print checklist (read-only)
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -437,6 +481,12 @@ async function cli() {
       const [parent, title, owner] = rest;
       if (!parent || !title) throw new Error('usage: followup <parent#> "<title>" [owner]');
       result = await followup(Number(parent), { title, owner }, ctx);
+      break;
+    }
+    case 'reshape': {
+      const [presetName] = rest;
+      if (!presetName) throw new Error('usage: reshape <preset>');
+      result = await reshape(presetName, ctx);
       break;
     }
     default:
