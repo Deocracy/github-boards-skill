@@ -26,6 +26,7 @@ import { loadPreset, laneNames } from './lib/presets.mjs';
 import { readState, writeState, diff } from './lib/state.mjs';
 import { ensureLedger, readLedger, writeLedger, appendCandidate, setIntent } from './lib/ledger.mjs';
 import { prepareInput, applyProposals } from './lib/mapper.mjs';
+import { classify, resolveDecisions, cidMarker } from './lib/promote.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -481,6 +482,33 @@ export async function mapRecord(ctx) {
   const say = `Processed ${n} candidate(s): ${report.mapped.length} card(s), ${report.comments.length} comment(s), ${report.split.length} split parent(s). ` +
     `${report.merged.length} merged, ${report.skipped.length} skipped, ${report.needsDecision.length} need a decision, ${report.rejected.length} rejected.`;
   return { report, questions, say };
+}
+
+/**
+ * bodyFor — issue body for a promoted card: the candidate note (if any) followed
+ * by the durable candidateId marker.
+ * @param {object} cand  the ledger candidate
+ * @param {string} cid   candidateId
+ * @returns {string}
+ */
+function bodyFor(cand, cid) {
+  const note = cand && cand.note ? String(cand.note).trim() : '';
+  return note ? `${note}\n\n${cidMarker(cid)}` : cidMarker(cid);
+}
+
+/**
+ * promotePlan(ctx) — classify the ledger's mapped/needs-decision candidates into
+ * promotion buckets. Read-only (no board, no ledger writes).
+ * @param {object} ctx { dir, config }
+ * @returns {Promise<{plan:object, say:string}>}
+ */
+export async function promotePlan(ctx) {
+  const dir = ctx.dir || process.cwd();
+  const ledger = (await readLedger(dir)) || { candidates: [] };
+  const plan = classify(ledger, ctx.config);
+  const say = `Promotion plan: ${plan.confident.length} confident card(s), ${plan.comments.length} comment(s) ready; ` +
+    `${plan.uncertain.length} need a decision; ${plan.skipped.length} skipped.`;
+  return { plan, say };
 }
 
 /**
