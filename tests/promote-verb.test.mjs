@@ -155,3 +155,38 @@ test('promote apply resumes a partial candidate: setStage fails once, re-run fin
   cand = (await readLedger(dir)).candidates[0];
   assert.equal(cand.status, 'promoted');
 });
+
+test('promote apply refuses a bad decisions file before any board write', async () => {
+  const dir = tmp();
+  // one low-confidence card -> it lands in uncertain
+  await seed(dir, [mappedCard({ id: 'bbbbbbbbbbbb', confidence: 0.4 })]);
+  const engine = makeMockEngine({});
+
+  // unknown candidateId
+  await assert.rejects(
+    () => promoteApply({ zzzzzzzzzzzz: { action: 'promote' } }, { engine, config: CFG, staged: false, dir }),
+    /refused/);
+  // invalid lane override on the real uncertain item
+  await assert.rejects(
+    () => promoteApply({ bbbbbbbbbbbb: { action: 'promote', lane: 'Nope' } }, { engine, config: CFG, staged: false, dir }),
+    /refused/);
+
+  assert.equal(engine.calls.length, 0, 'no engine ops on a refused run');
+  // confident bucket was empty here, so the ledger is untouched regardless
+  assert.equal((await readLedger(dir)).candidates[0].status, 'mapped');
+});
+
+test('promote apply refuses to commit when pushPolicy is manual (no engine calls)', async () => {
+  const dir = tmp();
+  await seed(dir, [mappedCard()]);
+  const engine = makeMockEngine({});
+  await assert.rejects(
+    () => promoteApply(null, { engine, config: { ...CFG, pushPolicy: 'manual' }, staged: false, dir }),
+    /pushPolicy is 'manual'/);
+  assert.equal(engine.calls.length, 0);
+
+  // but --staged still previews under manual policy
+  const staticEngine = makeMockEngine({ createIssue: () => ({ staged: true }) });
+  const r = await promoteApply(null, { engine: staticEngine, config: { ...CFG, pushPolicy: 'manual' }, staged: true, dir });
+  assert.equal(r.report.wouldCreate.length, 1);
+});
