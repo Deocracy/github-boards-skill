@@ -63,3 +63,32 @@ test('promote apply --staged previews only: createIssue(staged) + comment(staged
   assert.equal(after.candidates[0].status, 'mapped');
   assert.equal(after.candidates[1].status, 'mapped');
 });
+
+test('promote apply commits a confident card: create->add->stage->label, marker in body, ledger promoted', async () => {
+  const dir = tmp();
+  await seed(dir, [mappedCard()]);
+  const engine = makeMockEngine({
+    createIssue: () => ({ issueNodeId: 'I_1', number: 41, url: 'https://x/41', contentType: 'Issue' }),
+    addIssueToBoard: () => ({ itemId: 'IT_1' }),
+  });
+  const r = await promoteApply(null, { engine, config: CFG, staged: false, dir });
+
+  const ops = engine.calls.map((c) => c.op);
+  assert.deepEqual(ops, ['createIssue', 'addIssueToBoard', 'setStage', 'setLabels']);
+
+  // marker stamped into the issue body (createIssue's 2nd positional arg)
+  const createCall = engine.calls.find((c) => c.op === 'createIssue');
+  assert.match(createCall.args[1], /gboards:cid=aaaaaaaaaaaa/);
+  assert.match(createCall.args[1], /auth context/); // note preserved
+
+  // stage uses the mapped lane; labels use the owner routing label
+  assert.equal(engine.calls.find((c) => c.op === 'setStage').args[1], 'Building');
+  assert.match(engine.calls.find((c) => c.op === 'setLabels').args.join(' '), /agent:go/);
+
+  // ledger updated with refs
+  const after = (await readLedger(dir)).candidates[0];
+  assert.equal(after.status, 'promoted');
+  assert.equal(after.promotion.issueNumber, 41);
+  assert.equal(after.promotion.itemId, 'IT_1');
+  assert.equal(r.report.promoted.length, 1);
+});
