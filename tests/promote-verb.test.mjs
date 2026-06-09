@@ -92,3 +92,21 @@ test('promote apply commits a confident card: create->add->stage->label, marker 
   assert.equal(after.promotion.itemId, 'IT_1');
   assert.equal(r.report.promoted.length, 1);
 });
+
+test('promote apply commits a confident comment via engine.comment(commentTarget, text)', async () => {
+  const dir = tmp();
+  await seed(dir, [mappedComment()]);
+  const engine = makeMockEngine({ comment: () => ({ commentUrl: 'https://x/12#c1' }) });
+  const r = await promoteApply(null, { engine, config: CFG, staged: false, dir });
+
+  const ops = engine.calls.map((c) => c.op);
+  assert.deepEqual(ops, ['comment']); // no issue creation for a comment
+  const commentCall = engine.calls[0];
+  assert.equal(commentCall.args[0], 12);          // commentTarget
+  assert.equal(commentCall.args[1], 'see spec');  // text from note
+
+  const after = (await readLedger(dir)).candidates[0];
+  assert.equal(after.status, 'promoted');
+  assert.equal(after.promotion.commentTarget, 12);
+  assert.equal(r.report.promoted.length, 1);
+});
