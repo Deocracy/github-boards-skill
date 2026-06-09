@@ -26,3 +26,27 @@ export function resolveRules(config) {
   const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   return { ...DEFAULT_RULES, ...r };
 }
+
+/**
+ * Build the input packet handed to the LLM mapper. Includes only unmapped
+ * candidates (status === 'candidate'), the allowed lanes/owners, the resolved
+ * rules, and the optional live-session snapshot.
+ * @param {object|null} ledger  the M1 ledger object (or null)
+ * @param {object} config       the board config (needs stageOptions [+ optional rules])
+ * @param {string|null} session a freeform live-session-work summary, or null
+ * @returns {object} the mapper input packet
+ */
+export function prepareInput(ledger, config, session = null) {
+  const allowedLanes = Object.keys((config && config.stageOptions) || {});
+  const candidates = ((ledger && ledger.candidates) || [])
+    .filter((c) => c.status === 'candidate')
+    .map((c) => ({ candidateId: c.id, title: c.title, note: c.note || '', source: c.source || 'unknown' }));
+  return {
+    candidates,
+    allowedLanes,
+    allowedOwners: ['agent', 'human'],
+    defaultLane: allowedLanes[0] ?? null,
+    rules: resolveRules(config),
+    session: session || null,
+  };
+}
