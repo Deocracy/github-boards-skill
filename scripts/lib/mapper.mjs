@@ -178,6 +178,7 @@ export function applyProposals(ledger, proposals, config) {
       cand.kind = 'comment';
       cand.commentTarget = p.commentTarget;
       cand.suggestedOwner = null;
+      cand.confidence = p.confidence;
       cand.rationale = p.rationale || '';
       report.comments.push({ candidateId: p.candidateId, target: p.commentTarget });
       continue;

@@ -114,6 +114,10 @@ export function resolveDecisions(plan, decisions) {
       errors.push({ candidateId: u.candidateId, error: 'promote requires a lane (none mapped — supply one in the decision)' });
       continue;
     }
+    if (merged.kind === 'card' && merged.owner !== 'agent' && merged.owner !== 'human') {
+      errors.push({ candidateId: u.candidateId, error: 'promote requires an owner agent|human (none mapped — supply one in the decision)' });
+      continue;
+    }
     toCommit.push(merged);
   }
   return { toCommit, held, errors };

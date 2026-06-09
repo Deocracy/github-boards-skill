@@ -159,3 +159,49 @@ test('classify: low-confidence comment -> uncertain with reason low-confidence, 
   assert.equal(p.uncertain[0].reason, 'low-confidence');
   assert.equal(p.comments.length, 0);
 });
+
+// --- Bug 1 integration tests: applyProposals + classify round-trip for comments ---
+import { applyProposals } from '../scripts/lib/mapper.mjs';
+
+test('Bug1: applyProposals+classify: high-confidence comment (0.9) lands in comments, not uncertain', () => {
+  const ledger = { candidates: [
+    { id: 'eeeeeeeeeeee', title: 'note', note: 'see spec', source: 'x', status: 'candidate', addedAt: 't' },
+  ]};
+  const { ledger: out } = applyProposals(ledger, [
+    { candidateId: 'eeeeeeeeeeee', kind: 'comment', commentTarget: 12, confidence: 0.9, rationale: 'r' },
+  ], CFG);
+  const plan = classify(out, CFG);
+  assert.equal(plan.comments.length, 1, 'high-confidence comment must land in comments');
+  assert.equal(plan.comments[0].candidateId, 'eeeeeeeeeeee');
+  assert.equal(plan.uncertain.length, 0, 'must NOT be in uncertain');
+});
+
+test('Bug1: applyProposals+classify: low-confidence comment (0.4) lands in uncertain, not comments', () => {
+  const ledger = { candidates: [
+    { id: 'eeeeeeeeeeee', title: 'note', note: 'see spec', source: 'x', status: 'candidate', addedAt: 't' },
+  ]};
+  const { ledger: out } = applyProposals(ledger, [
+    { candidateId: 'eeeeeeeeeeee', kind: 'comment', commentTarget: 12, confidence: 0.4, rationale: 'r' },
+  ], CFG);
+  const plan = classify(out, CFG);
+  assert.equal(plan.uncertain.length, 1, 'low-confidence comment must land in uncertain');
+  assert.equal(plan.uncertain[0].candidateId, 'eeeeeeeeeeee');
+  assert.equal(plan.comments.length, 0, 'must NOT be in comments');
+});
+
+// --- Bug 2 tests: resolveDecisions fails closed when owner is missing ---
+
+test('Bug2: resolveDecisions: promote needs-decision card with lane but no owner -> error + NOT in toCommit', () => {
+  const r = resolveDecisions(planFixture(), { cccccccccccc: { action: 'promote', lane: 'Ideas' } });
+  assert.ok(r.errors.find((e) => /requires an owner/.test(e.error)), 'must error about missing owner');
+  assert.ok(!r.toCommit.find((x) => x.candidateId === 'cccccccccccc'), 'cccccccccccc must NOT be in toCommit');
+});
+
+test('Bug2: resolveDecisions: promote needs-decision card with both lane AND owner -> committed (regression guard)', () => {
+  const r = resolveDecisions(planFixture(), { cccccccccccc: { action: 'promote', lane: 'Ideas', owner: 'agent' } });
+  assert.equal(r.errors.length, 0, 'no errors when both lane and owner supplied');
+  const c = r.toCommit.find((x) => x.candidateId === 'cccccccccccc');
+  assert.ok(c, 'cccccccccccc must be in toCommit');
+  assert.equal(c.lane, 'Ideas');
+  assert.equal(c.owner, 'agent');
+});
