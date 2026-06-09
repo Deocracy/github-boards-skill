@@ -578,6 +578,12 @@ function makeRealEngine(eng, cfg) {
       eng.removeLabels(cfg, flagsFor(opts), issueNumber, (labels || []).join(',')),
     comment: (issueNumber, body, opts = {}) =>
       eng.comment(cfg, flagsFor(opts), issueNumber, body),
+    getOwnerId: (login) => eng.getOwnerId(login),
+    findProjectByTitle: (login, ownerType, title) => eng.findProjectByTitle(login, ownerType, title),
+    findStageFieldByName: (projectId, name) => eng.findStageFieldByName(projectId, name),
+    createProject: (ownerId, title, opts = {}) => eng.createProject(flagsFor(opts), ownerId, title),
+    createStageField: (projectId, lanes, opts = {}) => eng.createStageField(flagsFor(opts), projectId, lanes),
+    ensureLabels: (repo, labels, opts = {}) => eng.ensureLabels(flagsFor(opts), repo, labels),
   };
 }
 
@@ -585,11 +591,14 @@ function makeRealEngine(eng, cfg) {
  * Minimal CLI arg parse: <verb> [--staged] [--config <path>] [verb args...]
  */
 function parseCliArgs(argv) {
-  const out = { verb: null, staged: false, config: null, rest: [] };
+  const out = { verb: null, staged: false, config: null, preset: null, title: null, repo: null, rest: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--staged') out.staged = true;
     else if (a === '--config') out.config = argv[++i];
+    else if (a === '--preset') out.preset = argv[++i];
+    else if (a === '--title') out.title = argv[++i];
+    else if (a === '--repo') out.repo = argv[++i];
     else if (!out.verb) out.verb = a;
     else out.rest.push(a);
   }
@@ -597,7 +606,7 @@ function parseCliArgs(argv) {
 }
 
 async function cli() {
-  const { verb, staged, config: configPath, rest } = parseCliArgs(process.argv.slice(2));
+  const { verb, staged, config: configPath, preset, title, repo, rest } = parseCliArgs(process.argv.slice(2));
 
   if (!verb || verb === '--help' || verb === 'help') {
     console.log(`board-manager.mjs — conversational board verbs
@@ -610,9 +619,48 @@ async function cli() {
   followup <parent#> "<title>" [owner]  file a child card linked to its parent
   reshape <preset>                      diff board Stage options vs preset; print checklist (read-only)
   summary                               last-seen memory: what changed since last run (read-only toward board)
+  bootstrap [--preset build] [--title "..."] [--repo owner/name]  provision a board from the current repo
+  ledger [add "<title>"]              show or append to the intent ledger
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
+    return;
+  }
+
+  // bootstrap + ledger run WITHOUT an existing board.json — bypass loadConfig.
+  if (verb === 'ledger') {
+    const action = rest[0] === 'add' ? 'add' : 'show';
+    const arg = action === 'add' ? rest[1] : null;
+    const result = await ledger(action, arg, { dir: process.cwd() });
+    console.log(result.say);
+    return;
+  }
+  if (verb === 'bootstrap') {
+    const eng = await import('./board.mjs');
+    const { writeBoardConfig } = await import('./lib/config-writer.mjs');
+    const { detectRepo } = await import('./lib/repo-detect.mjs');
+    const { readFile } = await import('node:fs/promises');
+    const { resolve } = await import('node:path');
+
+    const boardPath = resolve(process.cwd(), 'board.json');
+    let existingConfig = null;
+    try { existingConfig = JSON.parse(await readFile(boardPath, 'utf8')); } catch { existingConfig = null; }
+
+    // --repo owner/name overrides git-remote detection.
+    const detect = repo
+      ? () => { const [o, n] = repo.split('/'); return { owner: o, repo: n, nameWithOwner: repo }; }
+      : detectRepo;
+
+    // makeRealEngine(eng, {}) is safe here: bootstrap only calls the provisioning
+    // ops, which ignore cfg. (The cfg-reading ops are never reached on this path.)
+    const engine = makeRealEngine(eng, {});
+    const result = await bootstrap({
+      engine, staged, dir: process.cwd(),
+      detectRepo: detect, writeConfig: (cfg) => writeBoardConfig(boardPath, cfg),
+      preset: preset || 'build', title, existingConfig,
+    });
+    console.log(result.say);
+    if (!staged) console.log(JSON.stringify(result, null, 2));
     return;
   }
 
