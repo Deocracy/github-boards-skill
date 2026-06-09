@@ -761,7 +761,7 @@ function makeRealEngine(eng, cfg) {
  * Minimal CLI arg parse: <verb> [--staged] [--config <path>] [verb args...]
  */
 function parseCliArgs(argv) {
-  const out = { verb: null, staged: false, config: null, preset: null, title: null, repo: null, session: null, proposals: null, rest: [] };
+  const out = { verb: null, staged: false, config: null, preset: null, title: null, repo: null, session: null, proposals: null, decisions: null, rest: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--staged') out.staged = true;
@@ -771,6 +771,7 @@ function parseCliArgs(argv) {
     else if (a === '--repo') out.repo = argv[++i];
     else if (a === '--session') out.session = argv[++i];
     else if (a === '--proposals') out.proposals = argv[++i];
+    else if (a === '--decisions') out.decisions = argv[++i];
     else if (!out.verb) out.verb = a;
     else out.rest.push(a);
   }
@@ -778,7 +779,7 @@ function parseCliArgs(argv) {
 }
 
 async function cli() {
-  const { verb, staged, config: configPath, preset, title, repo, session, proposals, rest } = parseCliArgs(process.argv.slice(2));
+  const { verb, staged, config: configPath, preset, title, repo, session, proposals, decisions: decisionsPath, rest } = parseCliArgs(process.argv.slice(2));
 
   if (!verb || verb === '--help' || verb === 'help') {
     console.log(`board-manager.mjs — conversational board verbs
@@ -795,6 +796,8 @@ async function cli() {
   ledger [add "<title>"]              show or append to the intent ledger
   map prepare [--session <file>]      build the LLM mapper input packet (needs a configured board)
   map record --proposals <file>       validate + record the mapper's proposals into the ledger
+  promote plan                          classify mapped candidates into promotion buckets (read-only)
+  promote apply [--decisions <file>]    promote confident + decided candidates to the board (idempotent)
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -922,6 +925,25 @@ async function cli() {
         return;
       } else {
         throw new Error('usage: map <prepare|record> [--session <file>] [--proposals <file>]');
+      }
+    }
+    case 'promote': {
+      const sub = rest[0];
+      const { readFile } = await import('node:fs/promises');
+      if (sub === 'plan' || !sub) {
+        const r = await promotePlan({ dir: process.cwd(), config: verbCfg });
+        console.log(r.say);
+        console.log(JSON.stringify(r.plan, null, 2));
+        return;
+      } else if (sub === 'apply') {
+        let decisions = null;
+        if (decisionsPath) decisions = JSON.parse(await readFile(decisionsPath, 'utf8'));
+        const r = await promoteApply(decisions, { ...ctx, dir: process.cwd() });
+        console.log(r.say);
+        console.log(JSON.stringify(r.report, null, 2));
+        return;
+      } else {
+        throw new Error('usage: promote <plan|apply> [--decisions <file>] [--staged]');
       }
     }
     default:
