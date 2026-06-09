@@ -111,6 +111,21 @@ function graphql(query, vars = {}) {
   return parsed.data;
 }
 
+// Build the request body for `gh api graphql --input -`. Exposed for testing.
+function buildGraphqlInput(query, variables = {}) {
+  return JSON.stringify({ query, variables });
+}
+
+// Like graphql(), but passes arbitrary (incl. array/object) variables via
+// `gh api graphql --input -`. The scalar-only graphql() helper above cannot
+// carry the singleSelectOptions array createProjectV2Field needs.
+function graphqlVars(query, variables = {}) {
+  const out = sh(["api", "graphql", "--input", "-"], { input: buildGraphqlInput(query, variables) });
+  const parsed = JSON.parse(out);
+  if (parsed.errors) throw new Error(`GraphQL errors: ${JSON.stringify(parsed.errors)}`);
+  return parsed.data;
+}
+
 // ---------------------------------------------------------------------------
 // staged-mode helper: every write routes through this. When --staged is set we
 // print the exact mutation that WOULD run and execute nothing (Invariant 4).
@@ -379,6 +394,88 @@ function addIssueToBoard(cfg, flags, issueUrl) {
       contentType: item.content?.__typename || item.type,
       upsert: true,
     };
+  });
+}
+
+// getOwnerId — resolve an owner login to its node id + type (User/Organization).
+// Read-only. ownerType is read from __typename so callers need not know it up front.
+function getOwnerId(login) {
+  const q = `query($login:String!){ repositoryOwner(login:$login){ id __typename } }`;
+  const data = graphql(q, { login });
+  const o = data.repositoryOwner;
+  if (!o) throw new Refusal(`owner '${login}' not found (check the org/user login)`);
+  return { ownerId: o.id, ownerType: o.__typename }; // "User" | "Organization"
+}
+
+// findProjectByTitle — return an existing ProjectV2 with this title under the
+// owner, or null. Used by bootstrap to ADOPT instead of duplicating. Read-only.
+function findProjectByTitle(login, ownerType, title) {
+  const ownerSel = String(ownerType).toLowerCase() === 'user' ? 'user' : 'organization';
+  const q = `query($login:String!){
+    ${ownerSel}(login:$login){ projectsV2(first:100){ nodes { id number title url } } }
+  }`;
+  const data = graphql(q, { login });
+  const nodes = data[ownerSel]?.projectsV2?.nodes || [];
+  const hit = nodes.find((n) => n.title === title);
+  return hit ? { projectId: hit.id, projectNumber: hit.number, url: hit.url } : null;
+}
+
+// findStageFieldByName — return an existing single-select field by name on a
+// project, or null. Used by bootstrap to ADOPT an existing Stage field. Read-only.
+function findStageFieldByName(projectId, name) {
+  const q = `query($id:ID!){
+    node(id:$id){ ... on ProjectV2 { fields(first:50){ nodes {
+      __typename ... on ProjectV2SingleSelectField { id name options { id name } }
+    } } } }
+  }`;
+  const data = graphql(q, { id: projectId });
+  const nodes = data.node?.fields?.nodes || [];
+  const f = nodes.find((n) => n.__typename === 'ProjectV2SingleSelectField' && n.name === name);
+  return f ? { stageFieldId: f.id, options: f.options.map((o) => ({ label: o.name, optionId: o.id })) } : null;
+}
+
+// createProject — createProjectV2 under an owner. Staged-previewable.
+function createProject(flags, ownerId, title) {
+  const plan = { op: "createProjectV2", ownerId, title };
+  return stagedGuard(flags, plan, () => {
+    const q = `mutation($ownerId:ID!,$title:String!){
+      createProjectV2(input:{ownerId:$ownerId,title:$title}){ projectV2 { id number url } }
+    }`;
+    const data = graphql(q, { ownerId, title });
+    const p = data.createProjectV2.projectV2;
+    return { projectId: p.id, projectNumber: p.number, url: p.url };
+  });
+}
+
+// createStageField — one createProjectV2Field (SINGLE_SELECT) with all lane
+// options inline. Uses graphqlVars (array variable). Staged-previewable.
+function createStageField(flags, projectId, lanes) {
+  const options = lanes.map((name) => ({ name, color: "GRAY", description: "" }));
+  const plan = { op: "createProjectV2Field", projectId, name: "Stage", dataType: "SINGLE_SELECT", options: lanes };
+  return stagedGuard(flags, plan, () => {
+    const q = `mutation($projectId:ID!,$name:String!,$options:[ProjectV2SingleSelectFieldOptionInput!]!){
+      createProjectV2Field(input:{projectId:$projectId,dataType:SINGLE_SELECT,name:$name,singleSelectOptions:$options}){
+        projectV2Field { ... on ProjectV2SingleSelectField { id name options { id name } } }
+      }
+    }`;
+    const data = graphqlVars(q, { projectId, name: "Stage", options });
+    const f = data.createProjectV2Field.projectV2Field;
+    return { stageFieldId: f.id, options: f.options.map((o) => ({ label: o.name, optionId: o.id })) };
+  });
+}
+
+// ensureLabels — idempotent `gh label create --force` for the routing labels.
+function ensureLabels(flags, repo, labels) {
+  const plan = { op: "gh label create", repo, labels };
+  return stagedGuard(flags, plan, () => {
+    const results = [];
+    for (const name of labels) {
+      const r = spawnSync("gh", ["label", "create", name, "--repo", repo, "--force"], { encoding: "utf8", shell: false });
+      if (r.error) throw new Error(`failed to spawn gh: ${r.error.message}`);
+      if (r.status !== 0) throw new Error(`gh label create ${name}: ${(r.stderr || r.stdout || "").trim()}`);
+      results.push(name);
+    }
+    return { created: results };
   });
 }
 
@@ -853,4 +950,7 @@ export {
   loadConfig, getStageField, listItems, getIssue, snapshot,
   createIssue, addIssueToBoard, setLabels, removeLabels, comment, setStage,
   capabilities, resolveStageOption, runDoctor, diffItems, runWatch, Refusal,
+  // M1 provisioning:
+  buildGraphqlInput, graphqlVars, getOwnerId, findProjectByTitle, findStageFieldByName,
+  createProject, createStageField, ensureLabels,
 };
