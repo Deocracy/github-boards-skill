@@ -1338,7 +1338,7 @@ A real end-to-end run against GitHub, **skipped unless `GBS_LIVE=1`** so normal 
 **Files:**
 - Test: `tests/live-bootstrap.test.mjs` (new)
 
-- [ ] **Step 1: Write the gated test**
+- [x] **Step 1: Write the gated test**
 
 Create `tests/live-bootstrap.test.mjs`:
 
@@ -1398,18 +1398,19 @@ test('LIVE: bootstrap creates a board, doctor sees it, then teardown', { skip: !
 });
 ```
 
-- [ ] **Step 2: Confirm it skips by default**
+- [x] **Step 2: Confirm it skips by default**
 
 Run: `npm test`
 Expected: the live test reports as skipped; all other tests pass.
 
-- [ ] **Step 3: Run it live once, manually, to prove the real path**
+- [x] **Step 3: Run it live once, manually, to prove the real path**
 
 Run: `GBS_LIVE=1 node --test tests/live-bootstrap.test.mjs`
 Expected: PASS — a `gbs-smoke-<pid>` project is created, asserted, then deleted. (On Windows PowerShell: `$env:GBS_LIVE=1; node --test tests/live-bootstrap.test.mjs`.)
 If it fails on a GraphQL shape, fix the offending op in `board.mjs` (the unit tests cover staged behavior; this is where real syntax is proven) and re-run.
+**Result (2026-06-08): PASS — `gbs-smoke-<pid>` project created (PVT_… id), Stage field (PVTSSF_… id) with 6 lanes confirmed, project deleted in teardown. Duration: ~5.9 s. 144 unit tests green, 1 live test skipped in normal `npm test`.**
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add tests/live-bootstrap.test.mjs
