@@ -114,7 +114,7 @@ Universal principles (*"a card is one actionable outcome; a comment is context o
 - Stable key = M1's content-hash **`candidateId`**.
 - `applyProposals` enriches only candidates in status `candidate` (skips settled items: `mapped`/`needs-decision`/`merged`/`split`/`dismissed`/`promoted`) → re-running `map` is a no-op on settled items. (Re-mapping a settled candidate — the `needsDecision` resolution / re-record path — is deferred to M3; M2 ships no `--remap`.)
 - **`mergeWith`** marks the duplicate `merged` (pointing at the survivor) → never a second card.
-- **`split`** children get deterministic ids (`hash(parentId + childTitle)`) → re-running yields the same children, no duplicate splits.
+- **`split`** children get deterministic ids (`hash(parentId + index + childTitle)` — index-salted so same-titled children can't collide) → re-running yields the same children, no duplicate splits.
 - Promotion-level dedup (no duplicate GitHub issues) is M3's job; M2 sets the durable `candidateId` M3 will stamp into the issue body as the external-id marker.
 
 ## 8. Ambiguity & escalation (I5)
