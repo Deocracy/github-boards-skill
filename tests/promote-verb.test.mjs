@@ -110,3 +110,20 @@ test('promote apply commits a confident comment via engine.comment(commentTarget
   assert.equal(after.promotion.commentTarget, 12);
   assert.equal(r.report.promoted.length, 1);
 });
+
+test('promote apply is idempotent: a re-run over a promoted candidate creates no second issue', async () => {
+  const dir = tmp();
+  await seed(dir, [mappedCard()]);
+  let issueNo = 41;
+  const engine = makeMockEngine({
+    createIssue: () => ({ issueNodeId: 'I_1', number: issueNo++, url: `https://x/${issueNo}`, contentType: 'Issue' }),
+    addIssueToBoard: () => ({ itemId: 'IT_1' }),
+  });
+  await promoteApply(null, { engine, config: CFG, staged: false, dir });   // first run -> promotes
+  const r2 = await promoteApply(null, { engine, config: CFG, staged: false, dir }); // second run -> no-op
+
+  // createIssue called exactly once across BOTH runs
+  assert.equal(engine.calls.filter((c) => c.op === 'createIssue').length, 1);
+  assert.equal(r2.report.promoted.length, 0);
+  assert.ok(r2.report.skipped.find((s) => s.reason === 'already promoted'));
+});

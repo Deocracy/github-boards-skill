@@ -550,7 +550,7 @@ export async function promoteApply(decisions, ctx) {
   const report = {
     promoted: [], partial: [], failed: [],
     held: held.map((h) => h.candidateId),
-    skipped: [...plan.skipped],
+    skipped: plan.skipped.map((s) => s.reason === 'promoted' ? { ...s, reason: 'already promoted' } : s),
     wouldCreate: [], wouldComment: [],
   };
 
