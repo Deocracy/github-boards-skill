@@ -190,3 +190,22 @@ test('promote apply refuses to commit when pushPolicy is manual (no engine calls
   const r = await promoteApply(null, { engine: staticEngine, config: { ...CFG, pushPolicy: 'manual' }, staged: true, dir });
   assert.equal(r.report.wouldCreate.length, 1);
 });
+
+test('promote apply isolates a per-candidate failure: one partial, the other still promoted', async () => {
+  const dir = tmp();
+  await seed(dir, [mappedCard(), mappedCard({ id: 'bbbbbbbbbbbb', title: 'Second' })]);
+  let n = 0;
+  const engine = makeMockEngine({
+    createIssue: () => ({ issueNodeId: `I_${++n}`, number: 40 + n, url: `https://x/${40 + n}`, contentType: 'Issue' }),
+    addIssueToBoard: () => ({ itemId: `IT_${n}` }),
+    setStage: (itemId) => { if (itemId === 'IT_1') throw new Error('stage boom'); return { ok: true }; },
+  });
+  const r = await promoteApply(null, { engine, config: CFG, staged: false, dir });
+  assert.equal(r.report.partial.length, 1);
+  assert.equal(r.report.promoted.length, 1);
+  const after = await readLedger(dir);
+  const first = after.candidates.find((c) => c.id === 'aaaaaaaaaaaa');
+  const second = after.candidates.find((c) => c.id === 'bbbbbbbbbbbb');
+  assert.equal(first.status, 'mapped');      // failed mid-chain -> not promoted
+  assert.equal(second.status, 'promoted');   // isolated success
+});

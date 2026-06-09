@@ -44,7 +44,7 @@ export function classify(ledger, config) {
     const conf = typeof c.confidence === 'number' ? c.confidence : 0;
 
     if (c.status === 'promoted' || c.status === 'dismissed' || c.status === 'merged' || c.status === 'split') {
-      skipped.push({ candidateId: c.id, reason: c.status });
+      skipped.push({ candidateId: c.id, reason: c.status === 'promoted' ? 'already promoted' : c.status });
       continue;
     }
     if (c.status === 'needs-decision') {

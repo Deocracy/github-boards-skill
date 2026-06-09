@@ -71,6 +71,7 @@ test('classify: settled + unmapped -> skipped (with reasons)', () => {
   assert.equal(p.uncertain.length, 0);
   assert.equal(p.skipped.length, 5);
   assert.ok(p.skipped.find((s) => s.candidateId === '555555555555' && s.reason === 'not-mapped'));
+  assert.ok(p.skipped.find((s) => s.candidateId === '111111111111' && s.reason === 'already promoted'));
 });
 
 test('classify: empty ledger -> empty buckets, allowedLanes populated', () => {

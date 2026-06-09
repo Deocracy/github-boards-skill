@@ -547,10 +547,12 @@ export async function promoteApply(decisions, ctx) {
   }
 
   const byId = new Map((ledger.candidates || []).map((c) => [c.id, c]));
+  // report.partial = commit-path errors (side effects may have partially landed);
+  // report.failed  = staged-preview errors (no side effects). held/skipped per resolveDecisions/classify.
   const report = {
     promoted: [], partial: [], failed: [],
     held: held.map((h) => h.candidateId),
-    skipped: plan.skipped.map((s) => s.reason === 'promoted' ? { ...s, reason: 'already promoted' } : s),
+    skipped: [...plan.skipped],
     wouldCreate: [], wouldComment: [],
   };
 
@@ -565,10 +567,10 @@ export async function promoteApply(decisions, ctx) {
       // PREVIEW ONLY — no board writes, no ledger writes.
       try {
         if (item.kind === 'comment') {
-          await engine.comment(item.commentTarget, item.text, { staged: true });
+          await engine.comment(item.commentTarget, item.text, { staged });
           report.wouldComment.push({ candidateId: item.candidateId, target: item.commentTarget });
         } else {
-          await engine.createIssue(item.title, bodyFor(cand, item.candidateId), { labels: [], staged: true });
+          await engine.createIssue(item.title, bodyFor(cand, item.candidateId), { labels: [], staged });
           report.wouldCreate.push({ candidateId: item.candidateId, title: item.title, lane: item.lane, owner: item.owner });
         }
       } catch (e) {
@@ -599,9 +601,12 @@ export async function promoteApply(decisions, ctx) {
       if (!prom.itemId) {
         const it = await engine.addIssueToBoard(prom.issueUrl, {});
         prom.itemId = it.itemId ?? null;
-        cand.promotion = prom;
+        cand.promotion = prom; // no-op when resuming (same ref); meaningful on the fresh-create branch
         await writeLedger(dir, ledger); // persist after board-add
       }
+      // setStage/setLabels are idempotent (set-to-value / add-label), so unlike
+      // createIssue/addIssueToBoard they need no resume guard — re-running them
+      // on a resumed partial is safe and a no-op.
       await engine.setStage(prom.itemId, item.lane, {});
       await engine.setLabels(prom.issueNumber, [config.routing[item.owner]], {});
       cand.status = 'promoted';
