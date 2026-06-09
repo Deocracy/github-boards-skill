@@ -103,3 +103,97 @@ test('validateProposal rejects contradictory proposals (mutually-exclusive inten
   // two dispositions at once
   assert.equal(validateProposal({ candidateId: 'a', kind: 'card', title: 'x', lane: 'Building', owner: 'agent', confidence: 0.9, mergeWith: 'b', needsDecision: { question: 'q', options: [] } }, vcfg, rules).ok, false);
 });
+
+import { applyProposals } from '../scripts/lib/mapper.mjs';
+
+const acfg = { stageOptions: { Ideas: 'o1', Building: 'o2', Shipped: 'o3' }, rules: { maxLanes: 3 } };
+const led = (cands) => ({ ledgerVersion: 1, intent: {}, candidates: cands });
+const cand = (id, over = {}) => ({ id, title: id, note: '', source: 's', suggestedLane: null, suggestedOwner: null, addedAt: 't', status: 'candidate', ...over });
+
+test('applyProposals maps a plain card: fills lane/owner/kind/confidence, status->mapped', () => {
+  const { ledger, report } = applyProposals(led([cand('a')]), [
+    { candidateId: 'a', kind: 'card', title: 'Refined', lane: 'Building', owner: 'agent', confidence: 0.9, rationale: 'r' },
+  ], acfg);
+  const c = ledger.candidates.find((x) => x.id === 'a');
+  assert.equal(c.status, 'mapped');
+  assert.equal(c.suggestedLane, 'Building');
+  assert.equal(c.suggestedOwner, 'agent');
+  assert.equal(c.kind, 'card');
+  assert.equal(c.title, 'Refined');
+  assert.equal(report.mapped.length, 1);
+});
+
+test('applyProposals: skip -> dismissed; comment -> mapped w/ commentTarget', () => {
+  const { ledger } = applyProposals(led([cand('a'), cand('b')]), [
+    { candidateId: 'a', kind: 'skip', title: 'noise', confidence: 0.9 },
+    { candidateId: 'b', kind: 'comment', title: 'note', commentTarget: 7, confidence: 0.9 },
+  ], acfg);
+  assert.equal(ledger.candidates.find((x) => x.id === 'a').status, 'dismissed');
+  const b = ledger.candidates.find((x) => x.id === 'b');
+  assert.equal(b.status, 'mapped');
+  assert.equal(b.kind, 'comment');
+  assert.equal(b.commentTarget, 7);
+});
+
+test('applyProposals: needsDecision -> status needs-decision + surfaced question', () => {
+  const { ledger, questions } = applyProposals(led([cand('a')]), [
+    { candidateId: 'a', kind: 'card', title: 'T', lane: 'Building', owner: 'agent', confidence: 0.4, needsDecision: { question: 'Which lane?', options: ['Ideas', 'Building'] } },
+  ], acfg);
+  assert.equal(ledger.candidates.find((x) => x.id === 'a').status, 'needs-decision');
+  assert.equal(questions.length, 1);
+  assert.equal(questions[0].candidateId, 'a');
+});
+
+test('applyProposals: mergeWith -> merged, mergedInto set, no second card', () => {
+  const { ledger, report } = applyProposals(led([cand('a'), cand('b')]), [
+    { candidateId: 'b', kind: 'card', title: 'dup', lane: 'Ideas', owner: 'human', confidence: 0.9, mergeWith: 'a' },
+  ], acfg);
+  const b = ledger.candidates.find((x) => x.id === 'b');
+  assert.equal(b.status, 'merged');
+  assert.equal(b.mergedInto, 'a');
+  assert.equal(report.merged.length, 1);
+});
+
+test('applyProposals: split -> parent status split, deterministic child ids, children appended as mapped', () => {
+  const r1 = applyProposals(led([cand('a')]), [
+    { candidateId: 'a', kind: 'card', title: 'bundle', lane: 'Building', owner: 'agent', confidence: 0.9, split: [
+      { title: 'part one', lane: 'Ideas', owner: 'human' }, { title: 'part two', lane: 'Building', owner: 'agent' },
+    ] },
+  ], acfg);
+  const parent = r1.ledger.candidates.find((x) => x.id === 'a');
+  assert.equal(parent.status, 'split');
+  assert.equal(parent.splitInto.length, 2);
+  const children = r1.ledger.candidates.filter((x) => x.parent === 'a');
+  assert.equal(children.length, 2);
+  assert.ok(children.every((c) => c.status === 'mapped'));
+  // deterministic: same id for the same parent+title
+  const idOfPartOne = children.find((c) => c.title === 'part one').id;
+  assert.equal(idOfPartOne.length, 12);
+});
+
+test('applyProposals rejects invalid proposals (invented lane) without writing them', () => {
+  const { ledger, report } = applyProposals(led([cand('a')]), [
+    { candidateId: 'a', kind: 'card', title: 'T', lane: 'Ghost', owner: 'agent', confidence: 0.9 },
+  ], acfg);
+  assert.equal(ledger.candidates.find((x) => x.id === 'a').status, 'candidate'); // untouched
+  assert.equal(report.rejected.length, 1);
+});
+
+test('applyProposals rejects proposals targeting a settled candidate (idempotency)', () => {
+  const { report } = applyProposals(led([cand('a', { status: 'mapped' })]), [
+    { candidateId: 'a', kind: 'card', title: 'T', lane: 'Building', owner: 'agent', confidence: 0.9 },
+  ], acfg);
+  assert.equal(report.rejected.length, 1);
+  assert.match(report.rejected[0].errors.join(' '), /settled/);
+});
+
+test('applyProposals enforces maxLanes across the batch (fail-closed, nothing written)', () => {
+  const cfg2 = { stageOptions: { Ideas: 'o1', Building: 'o2', Shipped: 'o3' }, rules: { maxLanes: 2 } };
+  const { ledger, report } = applyProposals(led([cand('a'), cand('b'), cand('c')]), [
+    { candidateId: 'a', kind: 'card', title: 'A', lane: 'Ideas', owner: 'human', confidence: 0.9 },
+    { candidateId: 'b', kind: 'card', title: 'B', lane: 'Building', owner: 'agent', confidence: 0.9 },
+    { candidateId: 'c', kind: 'card', title: 'C', lane: 'Shipped', owner: 'human', confidence: 0.9 },
+  ], cfg2);
+  assert.ok(ledger.candidates.every((c) => c.status === 'candidate')); // nothing written
+  assert.match(report.rejected.map((r) => r.errors.join(' ')).join(' '), /maxLanes/);
+});

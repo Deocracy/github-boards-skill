@@ -91,3 +91,105 @@ export function validateProposal(p, config, rules) {
   if (dispositions.length > 1) errors.push(`only one of split/mergeWith/needsDecision may be set (got ${dispositions.join(', ')})`);
   return { ok: errors.length === 0, errors };
 }
+
+function splitChildId(parentId, index, title) {
+  // index-salted so two children of the same parent can never collide, while
+  // re-running the same split (same parent, same order) stays deterministic.
+  return createHash('sha256').update(parentId + '::' + index + '::' + String(title).trim().toLowerCase()).digest('hex').slice(0, 12);
+}
+
+/**
+ * Apply validated proposals to a COPY of the ledger (pure — returns the new
+ * ledger, never mutates the input). Fail-closed: invalid proposals, unknown or
+ * settled candidates, and a batch exceeding maxLanes are rejected (not written)
+ * and reported. Returns { ledger, report, questions }.
+ */
+export function applyProposals(ledger, proposals, config) {
+  const rules = resolveRules(config);
+  const out = JSON.parse(JSON.stringify(ledger || { candidates: [] }));
+  if (!Array.isArray(out.candidates)) out.candidates = [];
+  const byId = new Map(out.candidates.map((c) => [c.id, c]));
+  const report = { mapped: [], comments: [], skipped: [], merged: [], split: [], needsDecision: [], rejected: [] };
+  const questions = [];
+
+  // Pass 1 — validate + filter to actionable proposals.
+  const actionable = [];
+  for (const p of (proposals || [])) {
+    const v = validateProposal(p, config, rules);
+    if (!v.ok) { report.rejected.push({ candidateId: p && p.candidateId ? p.candidateId : null, errors: v.errors }); continue; }
+    const cand = byId.get(p.candidateId);
+    if (!cand) { report.rejected.push({ candidateId: p.candidateId, errors: ['candidateId not present in ledger'] }); continue; }
+    if (cand.status !== 'candidate') { report.rejected.push({ candidateId: p.candidateId, errors: [`candidate status '${cand.status}' is already settled`] }); continue; }
+    actionable.push(p);
+  }
+
+  // Cross-proposal maxLanes cap (count distinct lanes used by cards + split children).
+  const lanes = new Set();
+  for (const p of actionable) {
+    if (p.kind === 'card' && !p.split && p.lane) lanes.add(p.lane);
+    if (Array.isArray(p.split)) for (const ch of p.split) lanes.add(ch.lane);
+  }
+  if (lanes.size > rules.maxLanes) {
+    report.rejected.push({ candidateId: null, errors: [`batch uses ${lanes.size} distinct lanes > maxLanes ${rules.maxLanes}`] });
+    return { ledger: out, report, questions }; // fail closed — write nothing
+  }
+
+  // Pass 2 — apply.
+  for (const p of actionable) {
+    const cand = byId.get(p.candidateId);
+    if (p.needsDecision) {
+      cand.status = 'needs-decision';
+      cand.needsDecision = p.needsDecision;
+      report.needsDecision.push({ candidateId: p.candidateId, question: p.needsDecision.question });
+      questions.push({ candidateId: p.candidateId, question: p.needsDecision.question, options: p.needsDecision.options || [] });
+      continue;
+    }
+    if (p.mergeWith) {
+      cand.status = 'merged';
+      cand.mergedInto = p.mergeWith;
+      report.merged.push({ candidateId: p.candidateId, into: p.mergeWith });
+      continue;
+    }
+    if (Array.isArray(p.split)) {
+      cand.status = 'split';
+      const childIds = [];
+      for (let ci = 0; ci < p.split.length; ci++) {
+        const ch = p.split[ci];
+        const id = splitChildId(p.candidateId, ci, ch.title);
+        childIds.push(id);
+        if (!byId.has(id)) {
+          const child = { id, title: ch.title, note: '', source: cand.source, suggestedLane: ch.lane, suggestedOwner: ch.owner, kind: 'card', confidence: p.confidence, parent: p.candidateId, addedAt: cand.addedAt, status: 'mapped' };
+          out.candidates.push(child);
+          byId.set(id, child);
+        }
+      }
+      cand.splitInto = childIds;
+      report.split.push({ candidateId: p.candidateId, into: childIds });
+      continue;
+    }
+    if (p.kind === 'skip') {
+      cand.status = 'dismissed';
+      report.skipped.push({ candidateId: p.candidateId });
+      continue;
+    }
+    if (p.kind === 'comment') {
+      cand.status = 'mapped';
+      cand.kind = 'comment';
+      cand.commentTarget = p.commentTarget;
+      cand.suggestedOwner = null;
+      cand.rationale = p.rationale || '';
+      report.comments.push({ candidateId: p.candidateId, target: p.commentTarget });
+      continue;
+    }
+    // plain card
+    cand.status = 'mapped';
+    cand.kind = 'card';
+    cand.suggestedLane = p.lane;
+    cand.suggestedOwner = p.owner;
+    cand.title = p.title || cand.title;
+    cand.confidence = p.confidence;
+    cand.rationale = p.rationale || '';
+    report.mapped.push({ candidateId: p.candidateId, lane: p.lane, owner: p.owner });
+  }
+  return { ledger: out, report, questions };
+}
