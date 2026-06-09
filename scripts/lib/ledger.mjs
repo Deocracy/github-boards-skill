@@ -66,7 +66,7 @@ export async function readLedger(dir) {
   }
 }
 
-async function writeLedger(dir, ledger) {
+export async function writeLedger(dir, ledger) {
   const d = join(dir, LEDGER_DIR);
   await mkdir(d, { recursive: true });
   const p = join(d, LEDGER_FILE);

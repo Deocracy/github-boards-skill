@@ -24,7 +24,8 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadPreset, laneNames } from './lib/presets.mjs';
 import { readState, writeState, diff } from './lib/state.mjs';
-import { ensureLedger, readLedger, appendCandidate, setIntent } from './lib/ledger.mjs';
+import { ensureLedger, readLedger, writeLedger, appendCandidate, setIntent } from './lib/ledger.mjs';
+import { prepareInput, applyProposals } from './lib/mapper.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -454,6 +455,35 @@ export async function ledger(action, arg, ctx) {
 }
 
 /**
+ * mapPrepare(ctx) — build the LLM mapper's input packet from the ledger + config.
+ * @param {object} ctx { dir, config, session? }
+ * @returns {Promise<object>} the input packet (see lib/mapper.prepareInput)
+ */
+export async function mapPrepare(ctx) {
+  const dir = ctx.dir || process.cwd();
+  // Read-only: never create a ledger file as a side effect of "prepare".
+  // prepareInput tolerates a null/empty ledger (Task 2 test).
+  const ledger = (await readLedger(dir)) || { candidates: [] };
+  return prepareInput(ledger, ctx.config, ctx.session || null);
+}
+
+/**
+ * mapRecord(ctx) — validate the mapper's proposals, enrich the ledger, persist,
+ * and return { report, questions }. Never touches the board.
+ * @param {object} ctx { dir, config, proposals }
+ */
+export async function mapRecord(ctx) {
+  const dir = ctx.dir || process.cwd();
+  const ledger = (await readLedger(dir)) || (await ensureLedger(dir));
+  const { ledger: enriched, report, questions } = applyProposals(ledger, ctx.proposals || [], ctx.config);
+  await writeLedger(dir, enriched);
+  const n = report.mapped.length + report.comments.length + report.split.length;
+  const say = `Processed ${n} candidate(s): ${report.mapped.length} card(s), ${report.comments.length} comment(s), ${report.split.length} split parent(s). ` +
+    `${report.merged.length} merged, ${report.skipped.length} skipped, ${report.needsDecision.length} need a decision, ${report.rejected.length} rejected.`;
+  return { report, questions, say };
+}
+
+/**
  * ownerOf — determine who owns a card based on routing labels.
  * Returns 'agent' | 'human' | null.
  * @param {string[]} labels
@@ -591,7 +621,7 @@ function makeRealEngine(eng, cfg) {
  * Minimal CLI arg parse: <verb> [--staged] [--config <path>] [verb args...]
  */
 function parseCliArgs(argv) {
-  const out = { verb: null, staged: false, config: null, preset: null, title: null, repo: null, rest: [] };
+  const out = { verb: null, staged: false, config: null, preset: null, title: null, repo: null, session: null, proposals: null, rest: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--staged') out.staged = true;
@@ -599,6 +629,8 @@ function parseCliArgs(argv) {
     else if (a === '--preset') out.preset = argv[++i];
     else if (a === '--title') out.title = argv[++i];
     else if (a === '--repo') out.repo = argv[++i];
+    else if (a === '--session') out.session = argv[++i];
+    else if (a === '--proposals') out.proposals = argv[++i];
     else if (!out.verb) out.verb = a;
     else out.rest.push(a);
   }
@@ -606,7 +638,7 @@ function parseCliArgs(argv) {
 }
 
 async function cli() {
-  const { verb, staged, config: configPath, preset, title, repo, rest } = parseCliArgs(process.argv.slice(2));
+  const { verb, staged, config: configPath, preset, title, repo, session, proposals, rest } = parseCliArgs(process.argv.slice(2));
 
   if (!verb || verb === '--help' || verb === 'help') {
     console.log(`board-manager.mjs — conversational board verbs
@@ -621,6 +653,8 @@ async function cli() {
   summary                               last-seen memory: what changed since last run (read-only toward board)
   bootstrap [--preset build] [--title "..."] [--repo owner/name]  provision a board from the current repo
   ledger [add "<title>"]              show or append to the intent ledger
+  map prepare [--session <file>]      build the LLM mapper input packet (needs a configured board)
+  map record --proposals <file>       validate + record the mapper's proposals into the ledger
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -726,6 +760,29 @@ async function cli() {
     case 'summary': {
       result = await summary({ ...ctx, dir: process.cwd() });
       break;
+    }
+    case 'map': {
+      // `session` and `proposals` are the destructured flag values (Step 5 widened
+      // the single top-of-cli() parseCliArgs destructure to include them).
+      const sub = rest[0];
+      const { readFile } = await import('node:fs/promises');
+      if (sub === 'prepare') {
+        // --session may be a file path or inline text; try as a file, fall back to literal.
+        let sessionText = null;
+        if (session) sessionText = await readFile(session, 'utf8').catch(() => session);
+        const pkt = await mapPrepare({ dir: process.cwd(), config: verbCfg, session: sessionText });
+        console.log(JSON.stringify(pkt, null, 2));
+        return;
+      } else if (sub === 'record') {
+        if (!proposals) throw new Error('usage: map record --proposals <path-to-proposals.json>');
+        const parsedProposals = JSON.parse(await readFile(proposals, 'utf8'));
+        const r = await mapRecord({ dir: process.cwd(), config: verbCfg, proposals: parsedProposals });
+        console.log(r.say);
+        console.log(JSON.stringify({ report: r.report, questions: r.questions }, null, 2));
+        return;
+      } else {
+        throw new Error('usage: map <prepare|record> [--session <file>] [--proposals <file>]');
+      }
     }
     default:
       throw new Error(`unknown verb '${verb}'. Run --help for the verb map.`);
