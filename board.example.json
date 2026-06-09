@@ -17,5 +17,13 @@
   },
   "projectUrl": "https://github.com/orgs/your-org/projects/23",
   "pushPolicy": "on-approval",
-  "pullCadence": "session-start"
+  "pullCadence": "session-start",
+  "rules": {
+    "maxLanes": 8,
+    "useTags": false,
+    "defaultOwner": "human",
+    "granularity": "fine",
+    "escalateConfidenceBelow": 0.6,
+    "escalateBatchOver": 12
+  }
 }
