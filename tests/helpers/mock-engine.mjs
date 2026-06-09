@@ -27,6 +27,12 @@ export function makeMockEngine(overrides = {}) {
     setLabels:      rec('setLabels'),
     removeLabels:   rec('removeLabels'),
     comment:        rec('comment'),
+    getOwnerId:          rec('getOwnerId'),
+    findProjectByTitle:  rec('findProjectByTitle'),
+    findStageFieldByName: rec('findStageFieldByName'),
+    createProject:       rec('createProject'),
+    createStageField:    rec('createStageField'),
+    ensureLabels:        rec('ensureLabels'),
     setStage:       guarded('setStage', (itemId) => {
       if (!itemId) {
         throw new Error('setStage: invalid itemId');

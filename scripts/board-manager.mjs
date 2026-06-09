@@ -24,6 +24,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { loadPreset, laneNames } from './lib/presets.mjs';
 import { readState, writeState, diff } from './lib/state.mjs';
+import { ensureLedger, readLedger, appendCandidate, setIntent } from './lib/ledger.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -354,6 +355,102 @@ export async function reshape(presetName, ctx) {
   }
 
   return { diff: { missing, extra }, applied: false, checklist, say };
+}
+
+/**
+ * bootstrap(ctx) — Tier-1: provision a real board from the current repo.
+ * Idempotent: resumes from ctx.existingConfig (partial board.json) and adopts an
+ * existing same-title project / Stage field instead of duplicating. Approval-gated
+ * via ctx.staged (staged previews the whole plan and writes nothing).
+ *
+ * @param {object} ctx { engine, staged, dir, detectRepo, writeConfig, preset?, title?, existingConfig? }
+ * @returns {Promise<{committed:boolean, staged?:boolean, plan?:object, config?:object, say:string}>}
+ */
+export async function bootstrap(ctx) {
+  const { engine, staged, dir } = ctx;
+  const detectRepo = ctx.detectRepo;
+  const writeConfig = ctx.writeConfig;
+  const presetName = ctx.preset || 'build';
+  const routing = { agent: 'agent:go', human: 'needs-claude' };
+
+  const repo = await detectRepo();
+  const repoSlug = repo.nameWithOwner || `${repo.owner}/${repo.repo}`;
+  const preset = await loadPreset(presetName);
+  const lanes = laneNames(preset);
+  const projectTitle = ctx.title || `${repo.repo} board`;
+
+  if (staged) {
+    const plan = { op: 'bootstrap', repo: repoSlug, projectTitle, lanes, labels: [routing.agent, routing.human] };
+    const say = `Would bootstrap board "${projectTitle}" on ${repoSlug}: ${lanes.length} lanes [${lanes.join(', ')}], labels [${routing.agent}, ${routing.human}]. After commit, set the board view to group by Stage (browser-only).`;
+    return { committed: false, staged: true, plan, say };
+  }
+
+  // COMMIT — write-as-you-go; resume from a partial existing config.
+  const cfg = { ...(ctx.existingConfig || {}) };
+  cfg.owner = repo.owner;
+  cfg.repo = repoSlug;
+  cfg.preset = presetName;
+  cfg.routing = routing;
+
+  const ownerInfo = await engine.getOwnerId(repo.owner);
+  cfg.ownerType = ownerInfo.ownerType;
+
+  // Project: reuse partial config -> else adopt same-title -> else create.
+  if (!cfg.projectId) {
+    const found = await engine.findProjectByTitle(repo.owner, ownerInfo.ownerType, projectTitle);
+    const proj = found || await engine.createProject(ownerInfo.ownerId, projectTitle, {});
+    cfg.projectId = proj.projectId;
+    cfg.projectNumber = proj.projectNumber;
+    cfg.projectUrl = proj.url;
+  }
+
+  // Stage field: reuse partial config -> else adopt existing -> else create.
+  if (!cfg.stageFieldId) {
+    const found = await engine.findStageFieldByName(cfg.projectId, 'Stage');
+    const field = found || await engine.createStageField(cfg.projectId, lanes, {});
+    cfg.stageFieldId = field.stageFieldId;
+    cfg.stageOptions = Object.fromEntries(field.options.map((o) => [o.label, o.optionId]));
+  }
+
+  cfg.pushPolicy = cfg.pushPolicy || 'on-approval';
+  cfg.pullCadence = cfg.pullCadence || 'session-start';
+
+  // Persist the complete binding ONCE. writeBoardConfig requires the full shape,
+  // so there is no partial/checkpoint file. Resumability after a mid-provision
+  // failure comes from two places instead: (i) a complete board.json passed back
+  // as ctx.existingConfig on a re-run, and (ii) the adopt-by-title path above
+  // (findProjectByTitle / findStageFieldByName), which rediscovers the
+  // already-created project/field on GitHub even if no local board.json survived.
+  await writeConfig(cfg);
+
+  await engine.ensureLabels(cfg.repo, [routing.agent, routing.human], {});
+
+  if (dir) {
+    await setIntent(dir, { wantsBoard: true, boundBoard: { projectNumber: cfg.projectNumber, projectUrl: cfg.projectUrl } });
+  }
+
+  const say = `Bootstrapped board "${projectTitle}" (#${cfg.projectNumber}) on ${cfg.repo} with ${lanes.length} lanes. One manual step remains: open the project and set the board view to group by Stage. Then run doctor.`;
+  return { committed: true, config: cfg, say };
+}
+
+/**
+ * ledger(action, arg, ctx) — inspect/append the Tier-0 intent ledger.
+ * @param {'show'|'add'} action
+ * @param {string|null} arg  candidate title (for 'add')
+ * @param {object} ctx { dir, source? }
+ * @returns {Promise<{say:string, ledger:object}>}
+ */
+export async function ledger(action, arg, ctx) {
+  const dir = ctx.dir || process.cwd();
+  if (action === 'add') {
+    if (!arg) throw new Error('usage: ledger add "<title>"');
+    const updated = await appendCandidate(dir, { title: arg, source: ctx.source || 'manual' });
+    return { say: `Added candidate "${arg}" (${updated.candidates.length} total in the ledger).`, ledger: updated };
+  }
+  const l = (await readLedger(dir)) || await ensureLedger(dir);
+  const n = l.candidates.length;
+  const bound = l.intent.boundBoard ? `bound to project #${l.intent.boundBoard.projectNumber}` : 'no board bound';
+  return { say: `Ledger: ${n} candidate(s), ${bound}.`, ledger: l };
 }
 
 /**
