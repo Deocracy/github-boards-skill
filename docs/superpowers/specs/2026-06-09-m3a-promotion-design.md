@@ -109,12 +109,12 @@ Claude writes this after the AskUserQuestion round (Approach B — one-shot with
 
 ## 7. The body marker & idempotency
 
-Two layers, marker is source-of-truth:
+Two layers, with distinct jobs:
 
-- **`cidMarker(cid)`** → `<!-- gboards:cid=<candidateId> -->`, appended to every created issue body. **`parseCid(body)`** extracts it back (returns `null` if absent; ignores unrelated HTML comments).
-- **Ledger `promoted` status** — the fast path; flipped per-candidate immediately after a successful chain, recording `{issueNumber, issueUrl, itemId}` (or `{commentTarget}` for comments).
+- **Ledger `promotion` refs (the resume mechanism)** — as each network step succeeds, the candidate's `promotion = {issueNumber, issueUrl, issueNodeId, itemId}` (or `{commentTarget}` for comments) is persisted **progressively** (after `createIssue`, after `addIssueToBoard`). On a re-run the apply loop reads these refs and skips the steps already done; on full success the candidate flips to `status:'promoted'` and `promote` skips it entirely. Resumability is therefore **ledger-only — no live board read**.
+- **`cidMarker(cid)`** → `<!-- gboards:cid=<candidateId> -->`, appended to every created issue body; **`parseCid(body)`** extracts it back (returns `null` if absent; ignores unrelated HTML comments). The marker is the **durable external-id key written for a future board-scan reconcile** (M3b/M4) — M3a only *writes* it. M3a does **not** read the marker back off live issues to drive resume (that read-back path is deferred to M3b/M4).
 
-Stable key throughout is M1's content-hash `candidateId` (and M2's index-salted `splitChildId` for split children). `promote` skips anything already `promoted`. Before `createIssue`, the apply loop treats an existing issue bearing this `candidateId` marker as "already created" → it does not create a duplicate; it resumes the chain from the first missing step. This is why the marker is stamped **at creation**, not after the full chain completes.
+Stable key throughout is M1's content-hash `candidateId` (and M2's index-salted `splitChildId` for split children). Because `createIssue` runs before its ledger persist, there is a **narrow accepted window**: if the process dies between `createIssue` returning and the ledger write, a re-run has no `promotion` ref and would create a second issue. M3a accepts this (the window is sub-second and the marker it stamped lets M3b/M4's reconcile detect+heal the orphan); closing it without a live read is out of scope for M3a.
 
 ## 8. `promote --decisions` apply loop
 
@@ -128,7 +128,7 @@ In `board-manager.mjs`, behind `stagedGuard`, for each item in the commit set, i
 
 ## 9. Error handling (fail-closed, resumable)
 
-- **Per-candidate atomicity within the chain:** if a later step throws (e.g. `setStage` fails after the issue exists), the candidate is **not** marked `promoted` — reported as `partial` with whatever refs succeeded (`issueNumber`/`issueUrl` captured, `itemId` null). Re-running detects the orphan via the body marker, skips `createIssue`, and resumes from the missing step.
+- **Per-candidate atomicity within the chain:** if a later step throws (e.g. `setStage` fails after the issue exists), the candidate is **not** marked `promoted` — reported as `partial` with whatever refs succeeded (`issueNumber`/`issueUrl`/`itemId` captured in the ledger `promotion` record). Re-running reads those persisted refs, skips the steps already done (`createIssue`/`addIssueToBoard`), and resumes from the missing step. `setStage`/`setLabels` are idempotent set-to-value/add-label ops, so they need no resume guard — re-running them is safe. (Resume is ledger-only; the body-marker read-back is deferred to M3b/M4 — see §7.)
 - **One bad candidate can't poison the batch:** the apply loop catches per-candidate, records the failure in `failed[]`, and continues. Report shape: `{promoted[], partial[], held[], skipped[], failed[]}`.
 - **Decisions-file validation (fail-closed):** unknown `candidateId`, bad `action`, or invented `lane`/`owner` override → the whole `--decisions` run is refused with a legible message **before any board write**. Malformed JSON → refused the same way.
 - **Empty cases:** `--plan` with nothing mapped → empty classification, not an error. `--decisions` with an empty commit set → no-op report.
