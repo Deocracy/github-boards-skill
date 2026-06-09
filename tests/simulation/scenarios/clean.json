@@ -1,0 +1,10 @@
+{
+  "name": "clean-single-source",
+  "config": { "stageOptions": { "Ideas": "o1", "Building": "o2", "Shipped": "o3" }, "rules": { "maxLanes": 6 } },
+  "session": null,
+  "candidates": [
+    { "id": "c1", "title": "Add login form", "note": "", "source": "superpowers:brainstorming", "status": "candidate" },
+    { "id": "c2", "title": "Write login tests", "note": "", "source": "superpowers:brainstorming", "status": "candidate" }
+  ],
+  "expect": { "allCardsHaveAllowedLane": true, "minMapped": 2, "noNeedsDecision": true }
+}

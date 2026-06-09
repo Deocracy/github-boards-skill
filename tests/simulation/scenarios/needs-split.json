@@ -1,0 +1,9 @@
+{
+  "name": "bundle-needs-split",
+  "config": { "stageOptions": { "Ideas": "o1", "Building": "o2", "Shipped": "o3" }, "rules": { "maxLanes": 6, "granularity": "fine" } },
+  "session": null,
+  "candidates": [
+    { "id": "b1", "title": "Build auth: login form, token storage, and logout", "note": "", "source": "manual", "status": "candidate" }
+  ],
+  "expect": { "expectSplitFor": "b1" }
+}
