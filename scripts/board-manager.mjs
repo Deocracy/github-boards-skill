@@ -512,6 +512,113 @@ export async function promotePlan(ctx) {
 }
 
 /**
+ * promoteApply(decisions, ctx) — commit the resolved promotion set to the board,
+ * updating the ledger per-candidate (resumable) and stamping the candidateId
+ * marker into each issue body.
+ *
+ * - --staged: preview only (createIssue/comment with staged:true), zero board AND
+ *   zero ledger writes (mirrors put --staged: no real issue exists, so the
+ *   downstream chain is NOT run on a null url/itemId).
+ * - pushPolicy=manual: refuses to commit (use --staged to preview).
+ * - Idempotent: a candidate already 'promoted' is skipped (never a second issue).
+ * - Resumable: a 'partial' candidate (createIssue done, later step failed) carries
+ *   cand.promotion refs; a re-run skips createIssue and resumes the chain. No live
+ *   board read — resumability is ledger-only.
+ *
+ * @param {object|null} decisions { [candidateId]: {action,lane?,owner?} }
+ * @param {object} ctx { engine, config, staged, dir }
+ * @returns {Promise<{report:object, say:string}>}
+ */
+export async function promoteApply(decisions, ctx) {
+  const { engine, config, staged } = ctx;
+  const dir = ctx.dir || process.cwd();
+
+  const policy = config.pushPolicy || 'auto-low-risk';
+  if (policy === 'manual' && !staged) {
+    throw new Error("promote: pushPolicy is 'manual' — run with --staged to preview; committing is disabled.");
+  }
+
+  const ledger = (await readLedger(dir)) || { candidates: [] };
+  const plan = classify(ledger, config);
+  const { toCommit, held, errors } = resolveDecisions(plan, decisions);
+  if (errors.length) {
+    throw new Error(`promote: refused — ${errors.length} bad decision(s): ` +
+      errors.map((e) => `${e.candidateId}: ${e.error}`).join('; '));
+  }
+
+  const byId = new Map((ledger.candidates || []).map((c) => [c.id, c]));
+  const report = {
+    promoted: [], partial: [], failed: [],
+    held: held.map((h) => h.candidateId),
+    skipped: [...plan.skipped],
+    wouldCreate: [], wouldComment: [],
+  };
+
+  for (const item of toCommit) {
+    const cand = byId.get(item.candidateId);
+    if (cand && cand.status === 'promoted') {
+      report.skipped.push({ candidateId: item.candidateId, reason: 'already promoted' });
+      continue;
+    }
+
+    if (staged) {
+      // PREVIEW ONLY — no board writes, no ledger writes.
+      try {
+        if (item.kind === 'comment') {
+          await engine.comment(item.commentTarget, item.text, { staged: true });
+          report.wouldComment.push({ candidateId: item.candidateId, target: item.commentTarget });
+        } else {
+          await engine.createIssue(item.title, bodyFor(cand, item.candidateId), { labels: [], staged: true });
+          report.wouldCreate.push({ candidateId: item.candidateId, title: item.title, lane: item.lane, owner: item.owner });
+        }
+      } catch (e) {
+        report.failed.push({ candidateId: item.candidateId, error: e.message });
+      }
+      continue;
+    }
+
+    // COMMIT
+    try {
+      if (item.kind === 'comment') {
+        await engine.comment(item.commentTarget, item.text, {});
+        cand.status = 'promoted';
+        cand.promotion = { commentTarget: item.commentTarget };
+        await writeLedger(dir, ledger);
+        report.promoted.push({ candidateId: item.candidateId, commentTarget: item.commentTarget });
+        continue;
+      }
+
+      // card — resumable create -> add -> stage -> label chain.
+      let prom = cand.promotion || null;
+      if (!prom || !prom.issueNumber) {
+        const issue = await engine.createIssue(item.title, bodyFor(cand, item.candidateId), { labels: [] });
+        prom = { issueNumber: issue.number ?? null, issueUrl: issue.url ?? null, issueNodeId: issue.issueNodeId ?? null };
+        cand.promotion = prom;
+        await writeLedger(dir, ledger); // persist after create
+      }
+      if (!prom.itemId) {
+        const it = await engine.addIssueToBoard(prom.issueUrl, {});
+        prom.itemId = it.itemId ?? null;
+        cand.promotion = prom;
+        await writeLedger(dir, ledger); // persist after board-add
+      }
+      await engine.setStage(prom.itemId, item.lane, {});
+      await engine.setLabels(prom.issueNumber, [config.routing[item.owner]], {});
+      cand.status = 'promoted';
+      await writeLedger(dir, ledger);
+      report.promoted.push({ candidateId: item.candidateId, issueNumber: prom.issueNumber, issueUrl: prom.issueUrl, itemId: prom.itemId });
+    } catch (e) {
+      report.partial.push({ candidateId: item.candidateId, error: e.message, promotion: (byId.get(item.candidateId) || {}).promotion || null });
+    }
+  }
+
+  const say = staged
+    ? `Would promote: ${report.wouldCreate.length} card(s), ${report.wouldComment.length} comment(s); ${report.held.length} held, ${report.skipped.length} skipped. (staged — nothing written.)`
+    : `Promoted ${report.promoted.length} item(s); ${report.partial.length} partial, ${report.held.length} held, ${report.skipped.length} skipped, ${report.failed.length} failed.`;
+  return { report, say };
+}
+
+/**
  * ownerOf — determine who owns a card based on routing labels.
  * Returns 'agent' | 'human' | null.
  * @param {string[]} labels
