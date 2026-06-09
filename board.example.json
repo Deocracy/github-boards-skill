@@ -14,5 +14,8 @@
   "routing": {
     "agent": "agent:go",
     "human": "needs-claude"
-  }
+  },
+  "projectUrl": "https://github.com/orgs/your-org/projects/23",
+  "pushPolicy": "on-approval",
+  "pullCadence": "session-start"
 }
