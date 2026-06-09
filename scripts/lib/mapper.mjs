@@ -50,3 +50,44 @@ export function prepareInput(ledger, config, session = null) {
     session: session || null,
   };
 }
+
+/**
+ * Fail-closed validation of a single proposal against the board config + rules.
+ * Per-proposal only; the cross-proposal maxLanes cap is enforced in applyProposals.
+ * @returns {{ok:boolean, errors:string[]}}
+ */
+export function validateProposal(p, config, rules) {
+  const errors = [];
+  if (!p || typeof p !== 'object') return { ok: false, errors: ['proposal is not an object'] };
+  const allowed = new Set(Object.keys((config && config.stageOptions) || {}));
+
+  if (!p.candidateId) errors.push('missing candidateId');
+  if (!['card', 'comment', 'skip'].includes(p.kind)) errors.push(`invalid kind '${p.kind}' (card|comment|skip)`);
+  if (typeof p.confidence !== 'number' || p.confidence < 0 || p.confidence > 1) errors.push('confidence must be a number 0..1');
+
+  if (p.kind === 'card' && !p.split) {
+    if (!p.lane || !allowed.has(p.lane)) errors.push(`lane '${p.lane}' not in allowed lanes [${[...allowed].join(', ')}]`);
+    if (!['agent', 'human'].includes(p.owner)) errors.push(`owner '${p.owner}' must be agent|human`);
+  }
+  if (p.kind === 'comment') {
+    if (!Number.isInteger(p.commentTarget)) errors.push('comment requires an integer commentTarget');
+  }
+  if (p.split != null) {
+    if (!Array.isArray(p.split) || p.split.length < 2) {
+      errors.push('split must be an array of 2+ children');
+    } else {
+      for (const ch of p.split) {
+        if (!ch || !ch.lane || !allowed.has(ch.lane)) errors.push(`split child lane '${ch && ch.lane}' not in allowed lanes`);
+        if (!ch || !['agent', 'human'].includes(ch.owner)) errors.push(`split child owner '${ch && ch.owner}' must be agent|human`);
+      }
+    }
+  }
+  // Mutually-exclusive intents: at most one disposition; skip/comment carry none.
+  // (Prevents a contradictory proposal from silently resolving by branch order.)
+  if ((p.kind === 'skip' || p.kind === 'comment') && (p.split != null || p.mergeWith != null || p.needsDecision != null)) {
+    errors.push(`kind '${p.kind}' cannot combine with split/mergeWith/needsDecision`);
+  }
+  const dispositions = ['split', 'mergeWith', 'needsDecision'].filter((k) => p[k] != null);
+  if (dispositions.length > 1) errors.push(`only one of split/mergeWith/needsDecision may be set (got ${dispositions.join(', ')})`);
+  return { ok: errors.length === 0, errors };
+}

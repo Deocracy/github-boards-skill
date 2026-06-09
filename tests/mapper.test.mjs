@@ -54,3 +54,52 @@ test('prepareInput tolerates a missing/empty ledger', () => {
   const pkt = prepareInput(null, cfg, null);
   assert.deepEqual(pkt.candidates, []);
 });
+
+import { validateProposal } from '../scripts/lib/mapper.mjs';
+
+const vcfg = { stageOptions: { Ideas: 'o1', Building: 'o2' } };
+const rules = resolveRules({});
+const card = (over = {}) => ({ candidateId: 'a', kind: 'card', title: 'T', lane: 'Building', owner: 'agent', confidence: 0.9, ...over });
+
+test('validateProposal accepts a well-formed card', () => {
+  assert.deepEqual(validateProposal(card(), vcfg, rules), { ok: true, errors: [] });
+});
+
+test('validateProposal rejects an invented lane', () => {
+  const v = validateProposal(card({ lane: 'Nope' }), vcfg, rules);
+  assert.equal(v.ok, false);
+  assert.match(v.errors.join(' '), /lane 'Nope' not in allowed/);
+});
+
+test('validateProposal rejects a bad owner and bad kind and bad confidence', () => {
+  assert.match(validateProposal(card({ owner: 'bot' }), vcfg, rules).errors.join(' '), /owner/);
+  assert.match(validateProposal(card({ kind: 'epic' }), vcfg, rules).errors.join(' '), /invalid kind/);
+  assert.match(validateProposal(card({ confidence: 2 }), vcfg, rules).errors.join(' '), /confidence/);
+});
+
+test('validateProposal requires candidateId', () => {
+  assert.match(validateProposal(card({ candidateId: undefined }), vcfg, rules).errors.join(' '), /candidateId/);
+});
+
+test('validateProposal: comment requires an integer commentTarget; lane/owner not required', () => {
+  assert.equal(validateProposal({ candidateId: 'a', kind: 'comment', title: 'note', commentTarget: 12, confidence: 0.8 }, vcfg, rules).ok, true);
+  assert.match(validateProposal({ candidateId: 'a', kind: 'comment', title: 'note', commentTarget: null, confidence: 0.8 }, vcfg, rules).errors.join(' '), /commentTarget/);
+});
+
+test('validateProposal: split children must each have an allowed lane + valid owner', () => {
+  const ok = card({ split: [{ title: 'c1', lane: 'Ideas', owner: 'human' }, { title: 'c2', lane: 'Building', owner: 'agent' }] });
+  assert.equal(validateProposal(ok, vcfg, rules).ok, true);
+  const bad = card({ split: [{ title: 'c1', lane: 'Ghost', owner: 'human' }] });
+  assert.equal(validateProposal(bad, vcfg, rules).ok, false);
+});
+
+test('validateProposal: skip needs neither lane nor owner', () => {
+  assert.equal(validateProposal({ candidateId: 'a', kind: 'skip', title: 'noise', confidence: 0.95 }, vcfg, rules).ok, true);
+});
+
+test('validateProposal rejects contradictory proposals (mutually-exclusive intents)', () => {
+  // skip + split is contradictory
+  assert.equal(validateProposal({ candidateId: 'a', kind: 'skip', title: 'x', confidence: 0.9, split: [{ title: 'c', lane: 'Building', owner: 'agent' }, { title: 'd', lane: 'Ideas', owner: 'human' }] }, vcfg, rules).ok, false);
+  // two dispositions at once
+  assert.equal(validateProposal({ candidateId: 'a', kind: 'card', title: 'x', lane: 'Building', owner: 'agent', confidence: 0.9, mergeWith: 'b', needsDecision: { question: 'q', options: [] } }, vcfg, rules).ok, false);
+});
