@@ -50,8 +50,8 @@ board-manager.mjs map record (--proposals <path> | stdin)
      owner ∈ {agent,human}, valid kind, candidateId exists, confidence ∈ [0,1],
      distinct lanes ≤ maxLanes
    → write enriched candidates to the LEDGER (status → mapped | needs-decision
-     | merged | dismissed[for kind:skip], reusing M1's status enum); reject
-     invalid proposals (report, don't write)
+     | merged | split | dismissed[for kind:skip], extending M1's status enum);
+     reject invalid proposals (report, don't write)
    → return a report + the ambiguity questions
           │
    [M3 later: promote 'mapped' candidates to the board, approval-gated]
@@ -112,7 +112,7 @@ Universal principles (*"a card is one actionable outcome; a comment is context o
 ## 7. Idempotency
 
 - Stable key = M1's content-hash **`candidateId`**.
-- `applyProposals` enriches only candidates in status `candidate` (skips `mapped`/`needs-decision`/`merged`/`promoted`) unless `--remap` → re-running `map` is a no-op on settled items.
+- `applyProposals` enriches only candidates in status `candidate` (skips settled items: `mapped`/`needs-decision`/`merged`/`split`/`dismissed`/`promoted`) → re-running `map` is a no-op on settled items. (Re-mapping a settled candidate — the `needsDecision` resolution / re-record path — is deferred to M3; M2 ships no `--remap`.)
 - **`mergeWith`** marks the duplicate `merged` (pointing at the survivor) → never a second card.
 - **`split`** children get deterministic ids (`hash(parentId + childTitle)`) → re-running yields the same children, no duplicate splits.
 - Promotion-level dedup (no duplicate GitHub issues) is M3's job; M2 sets the durable `candidateId` M3 will stamp into the issue body as the external-id marker.
@@ -120,7 +120,7 @@ Universal principles (*"a card is one actionable outcome; a comment is context o
 ## 8. Ambiguity & escalation (I5)
 
 - **Escalate inline → opus sub-agent** when any trigger fires: a candidate `confidence < escalateConfidenceBelow`, batch `> escalateBatchOver`, or **inter-skill conflict** (candidates from 2+ sources that disagree). The contract instructs Claude to re-map the affected batch with the strong model and use its proposals.
-- **Surface, don't guess:** a `needsDecision` proposal is recorded as `needs-decision` (never auto-mapped); `map record` returns these as questions the controller puts to the user. The answer re-records the candidate. Inter-skill ambiguity becomes an explicit "which source should drive this?" question.
+- **Surface, don't guess:** a `needsDecision` proposal is recorded as `needs-decision` (never auto-mapped); `map record` returns these as questions the controller puts to the user. The answer→re-record path itself lands in **M3** (M2 only surfaces). Inter-skill ambiguity becomes an explicit "which source should drive this?" question.
 
 ## 9. Error handling (fail-closed)
 
@@ -140,7 +140,7 @@ Universal principles (*"a card is one actionable outcome; a comment is context o
 - **Simulation grading:** golden-fixture assertions vs. an LLM judge vs. both — decide per scenario; LLM-judge needs a rubric and adds nondeterminism to the test itself.
 - **Contract location:** `references/mapper-contract.md` read on demand vs. inlined into SKILL.md — settle the discovery path (SKILL.md edits otherwise belong to M5).
 - **Session snapshot shape:** what exactly the controller hands the mapper as "live session work" (a freeform summary vs. structured recent-actions) — define the minimal useful shape.
-- **`needsDecision` resolution loop:** the exact re-record path after the user answers (a `map resolve <candidateId> <choice>` sub-verb vs. re-running `map record` with the answer folded in).
+- **`needsDecision` resolution loop:** RESOLVED at plan time — deferred to **M3** (its interactive promotion loop owns the answer→re-record path). M2 only surfaces the questions and ships no `map resolve` / `--remap`.
 
 ## 12. Module context
 
