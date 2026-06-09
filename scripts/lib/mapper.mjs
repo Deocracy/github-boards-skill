@@ -13,6 +13,7 @@ const DEFAULT_RULES = {
   granularity: 'fine',
   escalateConfidenceBelow: 0.6,
   escalateBatchOver: 12,
+  promoteConfidenceBelow: 0.8,
 };
 
 /**

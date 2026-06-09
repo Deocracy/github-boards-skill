@@ -32,3 +32,8 @@ test('a board.json WITH a rules block passes it through to resolveRules', async 
   assert.equal(r.maxLanes, 5);
   assert.equal(r.granularity, 'coarse');
 });
+
+test('resolveRules default includes promoteConfidenceBelow 0.8', () => {
+  assert.equal(resolveRules(null).promoteConfidenceBelow, 0.8);
+  assert.equal(resolveRules({ rules: { promoteConfidenceBelow: 0.5 } }).promoteConfidenceBelow, 0.5);
+});
