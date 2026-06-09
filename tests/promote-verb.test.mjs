@@ -127,3 +127,31 @@ test('promote apply is idempotent: a re-run over a promoted candidate creates no
   assert.equal(r2.report.promoted.length, 0);
   assert.ok(r2.report.skipped.find((s) => s.reason === 'already promoted'));
 });
+
+test('promote apply resumes a partial candidate: setStage fails once, re-run finishes without a second createIssue', async () => {
+  const dir = tmp();
+  await seed(dir, [mappedCard()]);
+  let stageCalls = 0;
+  const engine = makeMockEngine({
+    createIssue: () => ({ issueNodeId: 'I_1', number: 41, url: 'https://x/41', contentType: 'Issue' }),
+    addIssueToBoard: () => ({ itemId: 'IT_1' }),
+    setStage: () => { if (stageCalls++ === 0) throw new Error('stage boom'); return { ok: true }; },
+  });
+
+  // First run: create + add succeed, setStage throws -> partial, NOT promoted.
+  const r1 = await promoteApply(null, { engine, config: CFG, staged: false, dir });
+  assert.equal(r1.report.partial.length, 1);
+  assert.equal(r1.report.promoted.length, 0);
+  let cand = (await readLedger(dir)).candidates[0];
+  assert.equal(cand.status, 'mapped');               // NOT promoted
+  assert.equal(cand.promotion.issueNumber, 41);      // refs persisted
+  assert.equal(cand.promotion.itemId, 'IT_1');
+
+  // Second run: createIssue + addIssueToBoard are SKIPPED (refs present), setStage now succeeds.
+  const r2 = await promoteApply(null, { engine, config: CFG, staged: false, dir });
+  assert.equal(engine.calls.filter((c) => c.op === 'createIssue').length, 1, 'createIssue must run only once total');
+  assert.equal(engine.calls.filter((c) => c.op === 'addIssueToBoard').length, 1, 'addIssueToBoard must run only once total');
+  assert.equal(r2.report.promoted.length, 1);
+  cand = (await readLedger(dir)).candidates[0];
+  assert.equal(cand.status, 'promoted');
+});
