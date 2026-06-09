@@ -33,6 +33,9 @@ If the board isn't configured yet, run `node "<skill-dir>/scripts/board.mjs" doc
 | "Claude found more work" | `followup` | Files a child/sub-issue back onto the board |
 | "Set up / adjust the lanes" | `reshape` | Sets `Stage` options to the preset's columns + prints the UI-only view checklist |
 | "What changed / show the board" | `summary` | Diffs vs. last-seen state and reports |
+| "Figure out what goes on the board / map these" | `map` | Strongest-model mapper: raw candidates → validated card proposals (lane/owner/split/merge), surfacing ambiguity. See `references/mapper-contract.md`. Records to the ledger; never writes the board directly. |
+
+> **Mapping (M2):** to turn collected candidates into card proposals, run `map prepare` for the input packet, reason per `references/mapper-contract.md` (escalating to a stronger model when it says to), then `map record --proposals <file>`.
 
 ## Hard rules (do not violate)
 
