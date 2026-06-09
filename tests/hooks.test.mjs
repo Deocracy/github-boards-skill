@@ -95,6 +95,8 @@ test('SessionStart: no board.json -> NO context (graceful degrade)', async () =>
     {
       hasBoard: () => false,
       runSummary: async () => { ranSummary = true; return 'should not run'; },
+      ensureLedger: async () => ({ candidates: [] }),
+      readLedger: async () => ({ candidates: [] }),
     }
   );
   assert.equal(d, null);
@@ -108,6 +110,8 @@ test('SessionStart: board.json present -> context containing the say', async () 
     {
       hasBoard: () => true,
       runSummary: async () => fakeSay,
+      ensureLedger: async () => ({ candidates: [] }),
+      readLedger: async () => ({ candidates: [] }),
     }
   );
   assert.ok(d, 'expected context to be injected');
@@ -120,6 +124,8 @@ test('SessionStart: board present but summary throws -> NO context (degrade, no 
     {
       hasBoard: () => true,
       runSummary: async () => { throw new Error('gh not authenticated'); },
+      ensureLedger: async () => ({ candidates: [] }),
+      readLedger: async () => ({ candidates: [] }),
     }
   );
   assert.equal(d, null);
@@ -127,10 +133,10 @@ test('SessionStart: board present but summary throws -> NO context (degrade, no 
 
 test('SessionStart: board present but summary returns empty -> NO context', async () => {
   const dNull = await sessionStartDecide(
-    { cwd: '/p' }, { hasBoard: () => true, runSummary: async () => null }
+    { cwd: '/p' }, { hasBoard: () => true, runSummary: async () => null, ensureLedger: async () => ({ candidates: [] }), readLedger: async () => ({ candidates: [] }) }
   );
   const dBlank = await sessionStartDecide(
-    { cwd: '/p' }, { hasBoard: () => true, runSummary: async () => '   ' }
+    { cwd: '/p' }, { hasBoard: () => true, runSummary: async () => '   ', ensureLedger: async () => ({ candidates: [] }), readLedger: async () => ({ candidates: [] }) }
   );
   assert.equal(dNull, null);
   assert.equal(dBlank, null);
@@ -139,7 +145,7 @@ test('SessionStart: board present but summary returns empty -> NO context', asyn
 test('SessionStart: hasBoard throwing -> NO context (degrade)', async () => {
   const d = await sessionStartDecide(
     { cwd: '/p' },
-    { hasBoard: () => { throw new Error('fs blew up'); }, runSummary: async () => 'x' }
+    { hasBoard: () => { throw new Error('fs blew up'); }, runSummary: async () => 'x', ensureLedger: async () => ({ candidates: [] }), readLedger: async () => ({ candidates: [] }) }
   );
   assert.equal(d, null);
 });

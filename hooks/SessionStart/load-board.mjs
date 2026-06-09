@@ -25,6 +25,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { ensureLedger as defaultEnsureLedger, readLedger as defaultReadLedger } from '../../scripts/lib/ledger.mjs';
 
 /**
  * Default dependency: does <cwd>/board.json exist?
@@ -81,29 +82,34 @@ export async function defaultRunSummary(cwd) {
 export async function decide(input, deps = {}) {
   const hasBoard = deps.hasBoard || defaultHasBoard;
   const runSummary = deps.runSummary || defaultRunSummary;
+  const ensureLedgerFn = deps.ensureLedger || defaultEnsureLedger;
+  const readLedgerFn = deps.readLedger || defaultReadLedger;
 
   const cwd = (input && input.cwd) || process.cwd();
 
-  // No board configured -> silent no-op. This is the fresh-install path.
-  let boardPresent;
+  // Tier 0: ALWAYS ensure the ledger exists. Best-effort, never throws.
+  let ledger = null;
   try {
-    boardPresent = hasBoard(cwd);
+    ledger = await ensureLedgerFn(cwd);
   } catch {
-    return null;
+    try { ledger = await readLedgerFn(cwd); } catch { ledger = null; }
   }
-  if (!boardPresent) return null;
+  const candidateCount = ledger && Array.isArray(ledger.candidates) ? ledger.candidates.length : 0;
 
-  // Board configured -> try a summary, but degrade silently on ANY failure
-  // (unreachable board, gh not authed, malformed config, etc.).
-  let say;
-  try {
-    say = await runSummary(cwd);
-  } catch {
-    return null;
+  // Board summary (existing behavior), degrade silently on any failure.
+  let say = null;
+  let boardPresent = false;
+  try { boardPresent = hasBoard(cwd); } catch { boardPresent = false; }
+  if (boardPresent) {
+    try { say = await runSummary(cwd); } catch { say = null; }
   }
-  if (!say || typeof say !== 'string' || say.trim() === '') return null;
 
-  return { additionalContext: `GitHub board status: ${say.trim()}` };
+  // Compose. Stay silent (return null) only when there's nothing meaningful.
+  const parts = [];
+  if (say && typeof say === 'string' && say.trim()) parts.push(`GitHub board status: ${say.trim()}`);
+  if (candidateCount > 0) parts.push(`github-boards ledger: ${candidateCount} candidate(s) not yet on the board.`);
+  if (parts.length === 0) return null;
+  return { additionalContext: parts.join(' ') };
 }
 
 /**
