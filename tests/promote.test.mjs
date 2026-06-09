@@ -142,3 +142,19 @@ test('resolveDecisions: needs-decision card with a supplied lane -> committed', 
   assert.equal(c.lane, 'Ideas');
   assert.equal(c.owner, 'agent');
 });
+
+test('resolveDecisions: invalid owner override -> error and item NOT in toCommit', () => {
+  const r = resolveDecisions(planFixture(), { bbbbbbbbbbbb: { action: 'promote', lane: 'Building', owner: 'root' } });
+  assert.equal(r.errors.length, 1);
+  assert.match(r.errors[0].error, /owner override/);
+  assert.ok(!r.toCommit.find((x) => x.candidateId === 'bbbbbbbbbbbb'));
+});
+
+test('classify: low-confidence comment -> uncertain with reason low-confidence, not in comments', () => {
+  const p = classify(led([
+    { id: 'bbbbbbbbbbbb', title: 'Low conf comment', kind: 'comment', commentTarget: 12, confidence: 0.4, status: 'mapped' },
+  ]), CFG);
+  assert.equal(p.uncertain.length, 1);
+  assert.equal(p.uncertain[0].reason, 'low-confidence');
+  assert.equal(p.comments.length, 0);
+});

@@ -90,20 +90,22 @@ export function resolveDecisions(plan, decisions) {
   const uncertainById = new Map((plan.uncertain || []).map((u) => [u.candidateId, u]));
   const allowed = new Set(plan.allowedLanes || []);
   const errors = [];
+  const poisoned = new Set();
 
   // Validate every decision key references a real uncertain item with a legal payload.
   for (const cid of Object.keys(dec)) {
     const d = dec[cid] || {};
-    if (!uncertainById.has(cid)) { errors.push({ candidateId: cid, error: 'no uncertain item with this candidateId' }); continue; }
-    if (d.action !== 'promote' && d.action !== 'hold') { errors.push({ candidateId: cid, error: `action '${d.action}' must be promote|hold` }); continue; }
-    if (d.lane != null && !allowed.has(d.lane)) { errors.push({ candidateId: cid, error: `lane override '${d.lane}' not in allowed lanes` }); continue; }
-    if (d.owner != null && d.owner !== 'agent' && d.owner !== 'human') { errors.push({ candidateId: cid, error: `owner override '${d.owner}' must be agent|human` }); }
+    if (!uncertainById.has(cid)) { errors.push({ candidateId: cid, error: 'no uncertain item with this candidateId' }); poisoned.add(cid); continue; }
+    if (d.action !== 'promote' && d.action !== 'hold') { errors.push({ candidateId: cid, error: `action '${d.action}' must be promote|hold` }); poisoned.add(cid); continue; }
+    if (d.lane != null && !allowed.has(d.lane)) { errors.push({ candidateId: cid, error: `lane override '${d.lane}' not in allowed lanes` }); poisoned.add(cid); continue; }
+    if (d.owner != null && d.owner !== 'agent' && d.owner !== 'human') { errors.push({ candidateId: cid, error: `owner override '${d.owner}' must be agent|human` }); poisoned.add(cid); continue; }
   }
 
   const toCommit = [...(plan.confident || []), ...(plan.comments || [])];
   const held = [];
   for (const u of (plan.uncertain || [])) {
     const d = dec[u.candidateId];
+    if (poisoned.has(u.candidateId)) { held.push(u); continue; }
     if (!d || d.action === 'hold') { held.push(u); continue; }
     if (d.action !== 'promote') continue; // invalid action already recorded as an error
     const merged = { ...u, lane: d.lane ?? u.lane, owner: d.owner ?? u.owner };
