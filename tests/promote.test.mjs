@@ -80,3 +80,65 @@ test('classify: empty ledger -> empty buckets, allowedLanes populated', () => {
   assert.deepEqual(p.allowedLanes, ['Ideas', 'Building', 'Shipped']);
   assert.deepEqual(p.owners, ['agent', 'human']);
 });
+
+import { resolveDecisions } from '../scripts/lib/promote.mjs';
+
+function planFixture() {
+  return {
+    confident: [{ candidateId: 'aaaaaaaaaaaa', kind: 'card', title: 'A', lane: 'Building', owner: 'agent', confidence: 0.95 }],
+    comments: [{ candidateId: 'dddddddddddd', kind: 'comment', title: 'c', commentTarget: 12, text: 't', confidence: 0.9 }],
+    uncertain: [
+      { candidateId: 'bbbbbbbbbbbb', kind: 'card', title: 'B', lane: 'Ideas', owner: 'human', confidence: 0.4, reason: 'low-confidence', question: 'q', options: ['Ideas', 'Building'] },
+      { candidateId: 'cccccccccccc', kind: 'card', title: 'C', lane: null, owner: null, confidence: 0.3, reason: 'needs-decision', question: 'which?', options: [] },
+    ],
+    skipped: [], allowedLanes: ['Ideas', 'Building', 'Shipped'], owners: ['agent', 'human'],
+  };
+}
+
+test('resolveDecisions: confident + comments auto-commit; promote-decision joins; hold/missing held', () => {
+  const r = resolveDecisions(planFixture(), {
+    bbbbbbbbbbbb: { action: 'promote', lane: 'Building' },   // override lane
+    cccccccccccc: { action: 'hold' },
+  });
+  assert.equal(r.errors.length, 0);
+  const ids = r.toCommit.map((x) => x.candidateId).sort();
+  assert.deepEqual(ids, ['aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'dddddddddddd']);
+  // override applied + classify-only fields stripped
+  const b = r.toCommit.find((x) => x.candidateId === 'bbbbbbbbbbbb');
+  assert.equal(b.lane, 'Building');
+  assert.equal(b.reason, undefined);
+  assert.equal(b.question, undefined);
+  // cccccccccccc held; aaaa already auto so not in held
+  assert.deepEqual(r.held.map((h) => h.candidateId), ['cccccccccccc']);
+});
+
+test('resolveDecisions: unknown candidateId -> error', () => {
+  const r = resolveDecisions(planFixture(), { zzzzzzzzzzzz: { action: 'promote' } });
+  assert.equal(r.errors.length, 1);
+  assert.match(r.errors[0].error, /no uncertain item/);
+});
+
+test('resolveDecisions: bad action -> error', () => {
+  const r = resolveDecisions(planFixture(), { bbbbbbbbbbbb: { action: 'maybe' } });
+  assert.equal(r.errors.length, 1);
+  assert.match(r.errors[0].error, /must be promote\|hold/);
+});
+
+test('resolveDecisions: invalid lane override -> error', () => {
+  const r = resolveDecisions(planFixture(), { bbbbbbbbbbbb: { action: 'promote', lane: 'Nonexistent' } });
+  assert.equal(r.errors.length, 1);
+  assert.match(r.errors[0].error, /not in allowed lanes/);
+});
+
+test('resolveDecisions: promote a needs-decision card with no lane supplied -> error', () => {
+  const r = resolveDecisions(planFixture(), { cccccccccccc: { action: 'promote' } });
+  assert.ok(r.errors.find((e) => /requires a lane/.test(e.error)));
+});
+
+test('resolveDecisions: needs-decision card with a supplied lane -> committed', () => {
+  const r = resolveDecisions(planFixture(), { cccccccccccc: { action: 'promote', lane: 'Ideas', owner: 'agent' } });
+  assert.equal(r.errors.length, 0);
+  const c = r.toCommit.find((x) => x.candidateId === 'cccccccccccc');
+  assert.equal(c.lane, 'Ideas');
+  assert.equal(c.owner, 'agent');
+});

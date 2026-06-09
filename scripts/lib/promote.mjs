@@ -75,3 +75,44 @@ export function classify(ledger, config) {
   }
   return { confident, uncertain, comments, skipped, allowedLanes, owners: ['agent', 'human'] };
 }
+
+/**
+ * Resolve pre-gathered human decisions against a classify() plan. PURE.
+ * commit set = confident + comments (auto) + uncertain where action='promote'.
+ * Fail-closed: unknown candidateId, bad action, invalid lane/owner override, or a
+ * card with no resolvable lane -> errors (the verb refuses the whole run).
+ * @param {object} plan      classify() output
+ * @param {object} decisions { [candidateId]: { action:'promote'|'hold', lane?, owner? } }
+ * @returns {{toCommit:object[], held:object[], errors:object[]}}
+ */
+export function resolveDecisions(plan, decisions) {
+  const dec = decisions || {};
+  const uncertainById = new Map((plan.uncertain || []).map((u) => [u.candidateId, u]));
+  const allowed = new Set(plan.allowedLanes || []);
+  const errors = [];
+
+  // Validate every decision key references a real uncertain item with a legal payload.
+  for (const cid of Object.keys(dec)) {
+    const d = dec[cid] || {};
+    if (!uncertainById.has(cid)) { errors.push({ candidateId: cid, error: 'no uncertain item with this candidateId' }); continue; }
+    if (d.action !== 'promote' && d.action !== 'hold') { errors.push({ candidateId: cid, error: `action '${d.action}' must be promote|hold` }); continue; }
+    if (d.lane != null && !allowed.has(d.lane)) { errors.push({ candidateId: cid, error: `lane override '${d.lane}' not in allowed lanes` }); continue; }
+    if (d.owner != null && d.owner !== 'agent' && d.owner !== 'human') { errors.push({ candidateId: cid, error: `owner override '${d.owner}' must be agent|human` }); }
+  }
+
+  const toCommit = [...(plan.confident || []), ...(plan.comments || [])];
+  const held = [];
+  for (const u of (plan.uncertain || [])) {
+    const d = dec[u.candidateId];
+    if (!d || d.action === 'hold') { held.push(u); continue; }
+    if (d.action !== 'promote') continue; // invalid action already recorded as an error
+    const merged = { ...u, lane: d.lane ?? u.lane, owner: d.owner ?? u.owner };
+    delete merged.reason; delete merged.question; delete merged.options;
+    if (merged.kind === 'card' && !merged.lane) {
+      errors.push({ candidateId: u.candidateId, error: 'promote requires a lane (none mapped — supply one in the decision)' });
+      continue;
+    }
+    toCommit.push(merged);
+  }
+  return { toCommit, held, errors };
+}
