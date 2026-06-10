@@ -44,3 +44,39 @@ export function detectProfiles(presentDirs, config) {
   }
   return active;
 }
+
+/**
+ * Which watched files changed since the last sync?
+ * A file in ledgerSources but NOT in currentHashes (deleted upstream) is left
+ * alone — neither bucket; reconciling deletions is M4's job.
+ * @param {Record<string,{hash:string,profile:string}>} currentHashes
+ * @param {Record<string,{hash:string}>|null} ledgerSources
+ * @returns {{changed:{path:string,profile:string,hash:string}[], unchanged:string[]}}
+ */
+export function diffSources(currentHashes, ledgerSources) {
+  const prior = ledgerSources && typeof ledgerSources === 'object' ? ledgerSources : {};
+  const changed = [];
+  const unchanged = [];
+  for (const [path, cur] of Object.entries(currentHashes || {})) {
+    if (prior[path] && prior[path].hash === cur.hash) unchanged.push(path);
+    else changed.push({ path, profile: cur.profile, hash: cur.hash });
+  }
+  return { changed, unchanged };
+}
+
+/**
+ * The extraction packet Claude reads. Profiles are trimmed to what the LLM
+ * needs (name, hints, doneSignals) and filtered to those with changed files.
+ * @param {{path:string,profile:string}[]} changed
+ * @param {object[]} profiles  active profiles (detectProfiles output)
+ * @returns {{changedFiles:{path:string,profile:string}[], profiles:{name,hints,doneSignals}[]}}
+ */
+export function buildManifest(changed, profiles) {
+  const used = new Set((changed || []).map((c) => c.profile));
+  return {
+    changedFiles: (changed || []).map(({ path, profile }) => ({ path, profile })),
+    profiles: (profiles || [])
+      .filter((p) => used.has(p.name))
+      .map(({ name, hints, doneSignals }) => ({ name, hints, doneSignals })),
+  };
+}

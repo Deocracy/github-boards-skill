@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PROFILES } from '../scripts/lib/profiles.mjs';
-import { contentHash, detectProfiles } from '../scripts/lib/sources.mjs';
+import { contentHash, detectProfiles, diffSources, buildManifest } from '../scripts/lib/sources.mjs';
 
 test('PROFILES ships superpowers, gsd, generic — generic LAST (first-match-wins attribution)', () => {
   assert.deepEqual(PROFILES.map((p) => p.name), ['superpowers', 'gsd', 'generic']);
@@ -62,4 +62,56 @@ test('detectProfiles: config.sources.watch globs are added to the GENERIC profil
 test('detectProfiles: malformed sources block tolerated (back-compat)', () => {
   assert.deepEqual(detectProfiles([], { sources: 'nope' }).map((p) => p.name), ['generic']);
   assert.deepEqual(detectProfiles([], {}).map((p) => p.name), ['generic']);
+});
+
+// ── Task 3: diffSources + buildManifest ────────────────────────────────────
+
+test('diffSources: new file and changed hash are changed; matching hash unchanged', () => {
+  const current = {
+    'TODO.md': { hash: 'aaaaaaaaaaaa', profile: 'generic' },
+    'docs/superpowers/plans/p.md': { hash: 'bbbbbbbbbbbb', profile: 'superpowers' },
+    'ROADMAP.md': { hash: 'cccccccccccc', profile: 'generic' },
+  };
+  const ledgerSources = {
+    'TODO.md': { hash: 'aaaaaaaaaaaa', syncedAt: 't', profile: 'generic' },      // unchanged
+    'docs/superpowers/plans/p.md': { hash: 'OLD000000000', syncedAt: 't', profile: 'superpowers' }, // changed
+    // ROADMAP.md absent -> new
+  };
+  const { changed, unchanged } = diffSources(current, ledgerSources);
+  assert.deepEqual(unchanged, ['TODO.md']);
+  assert.deepEqual(
+    changed.map((c) => c.path).sort(),
+    ['ROADMAP.md', 'docs/superpowers/plans/p.md'],
+  );
+  const road = changed.find((c) => c.path === 'ROADMAP.md');
+  assert.equal(road.profile, 'generic');
+  assert.equal(road.hash, 'cccccccccccc');
+});
+
+test('diffSources: null/absent ledgerSources -> everything is changed (first sync)', () => {
+  const { changed, unchanged } = diffSources({ 'TODO.md': { hash: 'aaaaaaaaaaaa', profile: 'generic' } }, null);
+  assert.equal(changed.length, 1);
+  assert.equal(unchanged.length, 0);
+});
+
+test('diffSources: upstream-deleted file (in ledger, not on disk) is left alone — neither bucket', () => {
+  const { changed, unchanged } = diffSources({}, { 'gone.md': { hash: 'dddddddddddd', syncedAt: 't', profile: 'generic' } });
+  assert.equal(changed.length, 0);
+  assert.equal(unchanged.length, 0);
+});
+
+test('buildManifest: carries changed files + ONLY the profiles those files belong to', () => {
+  const profiles = detectProfiles(['docs/superpowers'], null); // superpowers + generic
+  const changed = [{ path: 'docs/superpowers/plans/p.md', profile: 'superpowers', hash: 'bbbbbbbbbbbb' }];
+  const m = buildManifest(changed, profiles);
+  assert.deepEqual(m.changedFiles, [{ path: 'docs/superpowers/plans/p.md', profile: 'superpowers' }]);
+  assert.deepEqual(m.profiles.map((p) => p.name), ['superpowers']); // generic unused -> omitted
+  assert.equal(typeof m.profiles[0].hints, 'string');
+  assert.ok(Array.isArray(m.profiles[0].doneSignals));
+  assert.equal(m.profiles[0].watch, undefined); // manifest is for the LLM: hints, not globs
+});
+
+test('buildManifest: empty changed set -> empty manifest, not an error', () => {
+  const m = buildManifest([], detectProfiles([], null));
+  assert.deepEqual(m, { changedFiles: [], profiles: [] });
 });
