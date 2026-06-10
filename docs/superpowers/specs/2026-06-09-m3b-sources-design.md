@@ -130,7 +130,7 @@ Claude writes this after reading the manifest's changed files:
 ]
 ```
 
-**`validateExtraction` is fail-closed:** malformed JSON, a non-array, or any item with a missing/empty `title` or `source` → the **whole run is refused** with a legible message, zero appends (same posture as M3a's decisions file). Per-item soft conditions are reported, not fatal: `done:true` → `skippedDone[]` (never appended); duplicate `candidateId` → `deduped[]`.
+**`validateExtraction` is fail-closed:** malformed JSON (refused with a legible message naming the file and parse error), a non-array, any item with a missing/empty `title` or `source`, or a non-boolean `done` (e.g. the string `"true"`) → the **whole run is refused**, zero appends (same posture as M3a's decisions file). Per-item soft conditions are reported, not fatal: `done:true` → `skippedDone[]` (never appended); duplicate `candidateId` → `deduped[]` — including a title whose candidate was already settled (mapped/promoted/dismissed) in an earlier run: a reappearing settled title dedupes by design and is visible in the report.
 
 **Why `source` is required:** dedup is title-hash (`candidateId`) — correct, the same task text shouldn't double-add — but `file#section` provenance is the durable external-id key M4 needs to detect "this plan task changed upstream," exactly as M3a's body marker is for board cards. M3b only *writes* it.
 
@@ -138,7 +138,7 @@ Claude writes this after reading the manifest's changed files:
 
 - `sync scan` hashes each watched file's content (sha256, 12 hex chars — same style as `candidateId`) and diffs against `ledger.sources["<path>"].hash`.
 - New file (no entry) or changed hash → `changedFiles`. Matching hash → skipped. A previously-synced file that no longer exists is simply absent from the manifest (its ledger entry is left in place — upstream-deletion handling is M4).
-- `sync record` updates `ledger.sources` **after all appends succeed** (persist-after-success, as in M3a).
+- `sync record` updates `ledger.sources` **after all appends succeed** (persist-after-success, as in M3a) and **coverage-gated**: a file's hash settles only if the extraction *spoke for it* — some item (live **or** `done:true`) whose `source` names that file (path truncated at `#`) — or it was already settled at this hash. A changed file the extraction did **not** cover keeps its old state → stays flagged on the next scan and is reported in `report.uncovered[]` (fail-closed: an LLM that omits a flagged file can't silently lose its work items). Corollary: a changed file with genuinely nothing actionable stays flagged until it is edited again or covered by a `done` item naming it.
 
 ## 8. Idempotency (three layers)
 
@@ -151,9 +151,10 @@ Claude writes this after reading the manifest's changed files:
 ## 9. Error handling
 
 - **Fail-closed recording:** any structurally invalid extraction item refuses the whole `sync record` run before any ledger write (§6).
-- **Hook safety:** the SessionStart scan is read-only; a scan error (unreadable file, bad glob) degrades to the existing note rather than breaking session start — matching the hook's current stay-silent-on-trouble posture.
+- **Hook safety + cost ceiling:** the SessionStart scan is read-only; a scan error (unreadable file, bad glob) degrades to the existing note rather than breaking session start — matching the hook's current stay-silent-on-trouble posture. The hook passes a **`maxFiles: 500` cap**: when the watched set exceeds it, `hashWatched` throws *before any file is read or hashed* (the walk itself is readdir-only and cheap) and the hook degrades silently to "no note." The CLI runs uncapped.
+- **Unsupported watch patterns are surfaced, never silently swallowed:** only literal paths and `<base>/**/*.<ext>` globs are supported; anything else a user puts in `config.sources.watch` (e.g. `docs/*.md`, a non-string) is reported in `manifest.ignoredPatterns[]` and the scan's `say` line.
 - **Empty cases:** no profiles beyond generic → fine; no watched files exist → empty manifest, not an error; extraction file with zero items → no-op report; no ledger yet → `sync record` ensures one (as `mapRecord` does).
-- **`sync scan` with no `board.json`:** profiles still detect and the scan still runs — the `sources` config block is optional and the verb must not require a bound board (the ledger is Tier-0, pre-board). Mirror the `ledger`/`bootstrap` verbs' loadConfig bypass.
+- **`sync scan` with no `board.json`:** profiles still detect and the scan still runs — the `sources` config block is optional and the verb must not require a bound board (the ledger is Tier-0, pre-board). Mirror the `ledger`/`bootstrap` verbs' loadConfig bypass; `--config <path>` is honored when supplied (raw read — never the fail-closed `loadConfig`).
 
 ## 10. Testing
 
@@ -168,7 +169,7 @@ All deterministic — temp-dir fs, no network, **no live gate** (M3b never touch
 
 - **Glob implementation:** Node ≥18 has no stable `fs.glob` everywhere; confirm the simplest dependency-free walk (recursive `readdir` + pattern match) consistent with the no-third-party-deps stance, and its symlink/depth behavior.
 - **Path normalization:** ledger keys must be repo-relative POSIX-style paths (forward slashes) so Windows and CI agree; confirm the existing repo conventions.
-- **Hook cost ceiling:** confirm the session-start scan stays cheap on large repos (watch sets are narrow globs, not full-tree walks); cap or skip-with-note if a watch set explodes.
+- **Hook cost ceiling:** ~~confirm the session-start scan stays cheap on large repos; cap or skip-with-note if a watch set explodes~~ — **resolved in implementation:** the hook scans with `maxFiles: 500`; exceeding it throws before any hashing and the hook degrades silently (§9).
 - **Manifest handoff:** exact print format of `sync scan` (JSON to stdout, as `map prepare` does) and the extraction-file path convention Claude uses (mirror `--proposals` handling).
 
 ## 12. Module context
