@@ -644,6 +644,10 @@ export async function syncScan(ctx) {
  *   a file edited BETWEEN scan and record is marked synced unread — narrow
  *   accepted window, same class as M3a's create->persist gap; the next edit
  *   re-flags it).
+ * - Coverage-gated settlement: a changed file with NO extraction item naming it
+ *   (live or done) keeps its old hash state -> stays flagged, reported in
+ *   report.uncovered. A changed file whose items are all done:true IS covered
+ *   (the done items name it) and settles.
  *
  * @param {object} ctx { dir, config?, extracted }  extracted = parsed extraction JSON
  * @returns {Promise<{report:object, say:string}>}
@@ -671,19 +675,36 @@ export async function syncRecord(ctx) {
     added.push({ candidateId: id, title: item.title, source: item.source });
   }
 
-  // Persist-after-success: settle the watch set's hashes only once appends are done.
+  // Persist-after-success, coverage-gated: settle a file's hash only if the
+  // extraction spoke for it (any item — live or done — whose source names it)
+  // or it was already settled at this hash. A changed file the extraction did
+  // NOT cover stays flagged (fail-closed) and is reported as `uncovered` — the
+  // next scan re-flags it rather than silently losing its work items.
+  const coveredFiles = new Set(
+    [...valid, ...skippedDone]
+      .map((it) => String(it.source).split('#')[0].trim())
+      .filter(Boolean),
+  );
   const profiles = detectProfiles(presentDetectDirs(dir), ctx.config || null);
   const currentHashes = await hashWatched(dir, profiles);
   const ledger = await readLedger(dir);
   ledger.sources = ledger.sources || {};
   const syncedAt = new Date().toISOString();
+  const uncovered = [];
   for (const [path, info] of Object.entries(currentHashes)) {
-    ledger.sources[path] = { hash: info.hash, syncedAt, profile: info.profile };
+    const prior = ledger.sources[path];
+    const unchanged = prior && prior.hash === info.hash;
+    if (unchanged || coveredFiles.has(path)) {
+      ledger.sources[path] = { hash: info.hash, syncedAt: unchanged ? prior.syncedAt : syncedAt, profile: info.profile };
+    } else {
+      uncovered.push(path);
+    }
   }
   await writeLedger(dir, ledger);
 
-  const report = { added, deduped, skippedDone, errors: [] };
-  const say = `Sync: added ${added.length} candidate(s); ${deduped.length} deduped, ${skippedDone.length} done item(s) skipped.`;
+  const report = { added, deduped, skippedDone, uncovered, errors: [] };
+  let say = `Sync: added ${added.length} candidate(s); ${deduped.length} deduped, ${skippedDone.length} done item(s) skipped.`;
+  if (uncovered.length) say += ` ${uncovered.length} changed file(s) not covered by the extraction — still flagged.`;
   return { report, say };
 }
 

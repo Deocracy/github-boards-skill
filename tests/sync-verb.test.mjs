@@ -222,3 +222,27 @@ test('syncScan: no ignored patterns -> manifest shape unchanged (no ignoredPatte
   const { manifest } = await syncScan({ dir, config: null });
   assert.equal(manifest.ignoredPatterns, undefined);
 });
+
+test('syncRecord: changed file NOT covered by the extraction stays flagged (fail-closed) and is reported', async () => {
+  const dir = tmp();
+  seedRepo(dir); // TODO.md + docs/superpowers/plans/p1.md both change-flagged
+  const { report, say } = await syncRecord({ dir, config: null, extracted: [
+    { title: 'fix the roof', source: 'TODO.md' }, // covers TODO.md only
+  ] });
+  assert.deepEqual(report.uncovered, ['docs/superpowers/plans/p1.md']);
+  assert.match(say, /1 changed file\(s\) not covered/);
+  const rescan = await syncScan({ dir, config: null });
+  assert.deepEqual(rescan.manifest.changedFiles.map((f) => f.path), ['docs/superpowers/plans/p1.md']);
+});
+
+test('syncRecord: a done-only extraction still covers (settles) its file', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  const { report } = await syncRecord({ dir, config: null, extracted: [
+    { title: 'fix the roof', source: 'TODO.md' },
+    { title: 'finished plan task', source: 'docs/superpowers/plans/p1.md#task-1', done: true },
+  ] });
+  assert.deepEqual(report.uncovered, []);
+  const rescan = await syncScan({ dir, config: null });
+  assert.equal(rescan.manifest.changedFiles.length, 0);
+});
