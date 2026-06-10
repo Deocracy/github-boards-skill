@@ -22,7 +22,7 @@
 import { pathToFileURL } from 'node:url';
 import { writeFile, readFile, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { loadPreset, laneNames } from './lib/presets.mjs';
 import { readState, writeState, diff } from './lib/state.mjs';
 import { ensureLedger, readLedger, writeLedger, appendCandidate, setIntent, candidateId } from './lib/ledger.mjs';
@@ -526,6 +526,7 @@ async function walkFiles(base) {
   try {
     entries = await readdir(base, { withFileTypes: true });
   } catch {
+    // ENOENT (missing dir) -> ok; other errors (EACCES) -> subtree skipped silently
     return [];
   }
   const out = [];
@@ -539,7 +540,8 @@ async function walkFiles(base) {
 
 /**
  * Expand watch patterns to repo-relative POSIX paths (deduped, sorted).
- * Unsupported pattern forms match nothing (never throw).
+ * Only `<base>/**\/*.<ext>` and bare literal paths are supported; other glob
+ * forms ("*", "?", "{...}", single-star) are silently ignored (never throw).
  * @param {string} dir       repo root
  * @param {string[]} patterns
  * @returns {Promise<string[]>}
@@ -561,7 +563,7 @@ export async function expandWatch(dir, patterns) {
     }
     // other glob forms: unsupported -> match nothing
   }
-  const rel = found.map((f) => f.slice(dir.length + 1).replace(/\\/g, '/'));
+  const rel = found.map((f) => relative(dir, f).replace(/\\/g, '/'));
   return [...new Set(rel)].sort();
 }
 
