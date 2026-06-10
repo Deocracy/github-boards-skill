@@ -160,3 +160,17 @@ test('validateExtraction: non-array and non-object items refused', () => {
 test('validateExtraction: empty array -> clean no-op shape', () => {
   assert.deepEqual(validateExtraction([]), { valid: [], skippedDone: [], errors: [] });
 });
+
+test('validateExtraction: done:true with a blank title is still an ERROR (fail-closed beats soft-skip)', () => {
+  const { valid, skippedDone, errors } = validateExtraction([{ done: true, source: 'TODO.md' }]);
+  assert.equal(valid.length, 0);
+  assert.equal(skippedDone.length, 0);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].index, 0);
+});
+
+test('buildManifest: changed entry with an unknown profile name -> file carried, profiles empty', () => {
+  const m = buildManifest([{ path: 'x.md', profile: 'ghost', hash: 'aaaaaaaaaaaa' }], detectProfiles([], null));
+  assert.deepEqual(m.changedFiles, [{ path: 'x.md', profile: 'ghost' }]);
+  assert.deepEqual(m.profiles, []);
+});

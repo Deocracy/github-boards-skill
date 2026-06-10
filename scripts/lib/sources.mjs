@@ -50,11 +50,11 @@ export function detectProfiles(presentDirs, config) {
  * A file in ledgerSources but NOT in currentHashes (deleted upstream) is left
  * alone — neither bucket; reconciling deletions is M4's job.
  * @param {Record<string,{hash:string,profile:string}>} currentHashes
- * @param {Record<string,{hash:string}>|null} ledgerSources
+ * @param {Record<string,{hash:string,[k:string]:unknown}>|null} ledgerSources  ledger.sources entries (only .hash is read)
  * @returns {{changed:{path:string,profile:string,hash:string}[], unchanged:string[]}}
  */
 export function diffSources(currentHashes, ledgerSources) {
-  const prior = ledgerSources && typeof ledgerSources === 'object' ? ledgerSources : {};
+  const prior = ledgerSources && typeof ledgerSources === 'object' && !Array.isArray(ledgerSources) ? ledgerSources : {};
   const changed = [];
   const unchanged = [];
   for (const [path, cur] of Object.entries(currentHashes || {})) {
@@ -87,6 +87,7 @@ export function buildManifest(changed, profiles) {
  * source) -> errors[]; the CALLER refuses the whole run when errors is
  * non-empty (same posture as M3a's decisions file). Soft conditions are not
  * errors: done:true -> skippedDone[] (the ledger collects intent, not history).
+ * A done:true item with a missing/blank title or source is still an ERROR — structural validity is checked first (fail-closed everywhere).
  * @param {unknown} items  parsed extraction-file JSON
  * @returns {{valid:{title,note,source}[], skippedDone:{title,source}[], errors:{index?:number,error:string}[]}}
  */
@@ -106,7 +107,7 @@ export function validateExtraction(items) {
     const source = typeof it.source === 'string' ? it.source.trim() : '';
     if (!title) { errors.push({ index, error: 'missing/empty title' }); return; }
     if (!source) { errors.push({ index, error: `missing/empty source (item "${title}")` }); return; }
-    if (it.done === true) { skippedDone.push({ title, source }); return; }
+    if (it.done === true) { skippedDone.push({ title, source }); return; } // note intentionally omitted — done items never reach the ledger
     valid.push({ title, note: typeof it.note === 'string' ? it.note : '', source });
   });
   return { valid, skippedDone, errors };
