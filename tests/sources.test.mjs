@@ -174,3 +174,11 @@ test('buildManifest: changed entry with an unknown profile name -> file carried,
   assert.deepEqual(m.changedFiles, [{ path: 'x.md', profile: 'ghost' }]);
   assert.deepEqual(m.profiles, []);
 });
+
+test('validateExtraction: non-boolean done (e.g. "true") is a structural ERROR, not silently live', () => {
+  const { valid, skippedDone, errors } = validateExtraction([{ title: 'Already done', source: 'TODO.md', done: 'true' }]);
+  assert.equal(valid.length, 0);
+  assert.equal(skippedDone.length, 0);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].error, /done must be a boolean/);
+});

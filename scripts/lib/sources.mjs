@@ -107,6 +107,10 @@ export function validateExtraction(items) {
     const source = typeof it.source === 'string' ? it.source.trim() : '';
     if (!title) { errors.push({ index, error: 'missing/empty title' }); return; }
     if (!source) { errors.push({ index, error: `missing/empty source (item "${title}")` }); return; }
+    if (it.done !== undefined && typeof it.done !== 'boolean') {
+      errors.push({ index, error: `done must be a boolean (item "${title}")` });
+      return;
+    }
     if (it.done === true) { skippedDone.push({ title, source }); return; } // note intentionally omitted — done items never reach the ledger
     valid.push({ title, note: typeof it.note === 'string' ? it.note : '', source });
   });

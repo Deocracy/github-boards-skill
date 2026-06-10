@@ -18,7 +18,7 @@ export const PROFILES = [
     detect: 'docs/superpowers',
     watch: ['docs/superpowers/plans/**/*.md'],
     hints:
-      'Each "### Task N:" heading in a plan is ONE candidate. The checkbox steps ' +
+      'Each "## Task N:" or "### Task N:" heading (any heading level) is ONE candidate. The checkbox steps ' +
       'under a task are implementation detail, not separate candidates. ' +
       'Title = the task name after the colon. Use the plan Goal line or the ' +
       'linked spec for the note. A task whose checkbox steps are all "- [x]" is done.',
