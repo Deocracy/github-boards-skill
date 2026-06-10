@@ -246,3 +246,9 @@ test('syncRecord: a done-only extraction still covers (settles) its file', async
   const rescan = await syncScan({ dir, config: null });
   assert.equal(rescan.manifest.changedFiles.length, 0);
 });
+
+test('syncScan: maxFiles cap exceeded -> throws before any hashing (hook degrades silently)', async () => {
+  const dir = tmp();
+  seedRepo(dir); // 2 watched files
+  await assert.rejects(() => syncScan({ dir, config: null, maxFiles: 1 }), /exceeds cap/);
+});

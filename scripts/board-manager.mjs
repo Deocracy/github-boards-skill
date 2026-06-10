@@ -573,6 +573,7 @@ export async function expandWatch(dir, patterns) {
  * (profiles arrive in PROFILES order — specific first, generic last).
  * @param {string} dir
  * @param {object[]} profiles  detectProfiles output
+ * @param {{maxFiles?:number}} [opts]  cap on watched-file count (throws when exceeded; hashing never starts)
  * @returns {Promise<Record<string,{hash:string,profile:string}>>}
  */
 export async function hashWatched(dir, profiles, opts = {}) {
@@ -603,6 +604,7 @@ export async function hashWatched(dir, profiles, opts = {}) {
  * READ-ONLY: no ledger writes (never even creates one), no board, no LLM.
  * The returned manifest is the packet Claude extracts from (lib/sources.buildManifest).
  * @param {object} ctx { dir, config? }  config = RAW board.json or null (sources block only)
+ *   ctx.maxFiles? — watched-file cap (throws; used by the SessionStart hook to bound session-start cost)
  * @returns {Promise<{manifest:object, say:string}>}
  */
 export async function syncScan(ctx) {
@@ -1061,8 +1063,9 @@ async function cli() {
   if (verb === 'sync') {
     const sub = rest[0];
     const { readFile: rf } = await import('node:fs/promises');
+    const boardPath = configPath || join(process.cwd(), 'board.json');
     let rawCfg = null;
-    try { rawCfg = JSON.parse(await rf(join(process.cwd(), 'board.json'), 'utf8')); } catch { rawCfg = null; }
+    try { rawCfg = JSON.parse(await rf(boardPath, 'utf8')); } catch { rawCfg = null; }
     if (sub === 'scan' || !sub) {
       const r = await syncScan({ dir: process.cwd(), config: rawCfg });
       console.log(r.say);
@@ -1071,7 +1074,9 @@ async function cli() {
     }
     if (sub === 'record') {
       if (!extracted) throw new Error('usage: sync record --extracted <path-to-extraction.json>');
-      const items = JSON.parse(await rf(extracted, 'utf8'));
+      let items;
+      try { items = JSON.parse(await rf(extracted, 'utf8')); }
+      catch (e) { throw new Error(`sync: refused — could not read/parse extraction file '${extracted}': ${e.message}`); }
       const r = await syncRecord({ dir: process.cwd(), config: rawCfg, extracted: items });
       console.log(r.say);
       console.log(JSON.stringify(r.report, null, 2));

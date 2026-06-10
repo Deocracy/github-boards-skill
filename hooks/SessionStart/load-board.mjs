@@ -14,10 +14,13 @@
 // Signals that have nothing to report are omitted; if all three are empty the
 // hook exits 0 with no context injected.
 //
-// GRACEFUL DEGRADE (the load-bearing rule): if there is NO board.json, or the
-// board is unreachable (gh not authed, network down, malformed config — anything),
-// the hook exits 0 with NO context injected and NO error noise. A fresh install
-// with no board configured must never spam every single session start.
+// GRACEFUL DEGRADE (the load-bearing rule): if the board is unreachable (no
+// board.json, gh not authed, network down, malformed config — anything), the
+// BOARD SUMMARY signal degrades silently; the hook stays silent only when there
+// is nothing meaningful to say (no board status, no candidates, no changed
+// sources). Ledger and source-change signals fire regardless of board presence —
+// a fresh install with no board configured but a populated ledger or changed
+// sources still gets those signals. No error noise, always exit 0.
 //
 // FORMAT (verified against https://code.claude.com/docs/en/hooks):
 //   - Input arrives as JSON on stdin: { session_id, cwd, source, hook_event_name, ... }
@@ -92,7 +95,7 @@ export async function defaultScanSources(cwd) {
   const { syncScan } = await import('../../scripts/board-manager.mjs');
   let rawCfg = null;
   try { rawCfg = JSON.parse(await readFile(join(cwd, 'board.json'), 'utf8')); } catch { rawCfg = null; }
-  const r = await syncScan({ dir: cwd, config: rawCfg });
+  const r = await syncScan({ dir: cwd, config: rawCfg, maxFiles: 500 });
   return r.manifest.changedFiles.length;
 }
 
