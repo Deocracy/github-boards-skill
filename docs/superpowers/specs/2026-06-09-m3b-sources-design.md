@@ -79,9 +79,9 @@ New code is **bold**. M3b mirrors M1/M2/M3a's pure-module pattern, so everything
   name: 'superpowers',
   detect: 'docs/superpowers',            // presence of this dir activates the profile
   watch: ['docs/superpowers/plans/**/*.md'],
-  hints: 'Each "### Task N:" heading is ONE candidate; the checkbox steps under it are ' +
-         'implementation detail, not separate candidates. Title = the task name after ' +
-         "the colon. Use the plan's linked spec for the note.",
+  hints: 'Each "## Task N:" or "### Task N:" heading (any level) is ONE candidate; the ' +
+         'checkbox steps under it are implementation detail, not separate candidates. ' +
+         "Title = the task name after the colon. Use the plan's linked spec for the note.",
   doneSignals: ['- [x] on every step of the task', 'Status: shipped', 'Status: complete'],
 }
 ```
