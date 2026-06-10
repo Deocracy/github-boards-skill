@@ -80,3 +80,34 @@ export function buildManifest(changed, profiles) {
       .map(({ name, hints, doneSignals }) => ({ name, hints, doneSignals })),
   };
 }
+
+/**
+ * Fail-closed gate on the LLM-written extraction file.
+ * Structural problems (non-array, non-object item, missing/empty title or
+ * source) -> errors[]; the CALLER refuses the whole run when errors is
+ * non-empty (same posture as M3a's decisions file). Soft conditions are not
+ * errors: done:true -> skippedDone[] (the ledger collects intent, not history).
+ * @param {unknown} items  parsed extraction-file JSON
+ * @returns {{valid:{title,note,source}[], skippedDone:{title,source}[], errors:{index?:number,error:string}[]}}
+ */
+export function validateExtraction(items) {
+  if (!Array.isArray(items)) {
+    return { valid: [], skippedDone: [], errors: [{ error: 'extraction must be a JSON array of items' }] };
+  }
+  const valid = [];
+  const skippedDone = [];
+  const errors = [];
+  items.forEach((it, index) => {
+    if (!it || typeof it !== 'object' || Array.isArray(it)) {
+      errors.push({ index, error: 'item must be an object' });
+      return;
+    }
+    const title = typeof it.title === 'string' ? it.title.trim() : '';
+    const source = typeof it.source === 'string' ? it.source.trim() : '';
+    if (!title) { errors.push({ index, error: 'missing/empty title' }); return; }
+    if (!source) { errors.push({ index, error: `missing/empty source (item "${title}")` }); return; }
+    if (it.done === true) { skippedDone.push({ title, source }); return; }
+    valid.push({ title, note: typeof it.note === 'string' ? it.note : '', source });
+  });
+  return { valid, skippedDone, errors };
+}

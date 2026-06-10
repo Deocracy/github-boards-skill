@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PROFILES } from '../scripts/lib/profiles.mjs';
-import { contentHash, detectProfiles, diffSources, buildManifest } from '../scripts/lib/sources.mjs';
+import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction } from '../scripts/lib/sources.mjs';
 
 test('PROFILES ships superpowers, gsd, generic — generic LAST (first-match-wins attribution)', () => {
   assert.deepEqual(PROFILES.map((p) => p.name), ['superpowers', 'gsd', 'generic']);
@@ -114,4 +114,49 @@ test('buildManifest: carries changed files + ONLY the profiles those files belon
 test('buildManifest: empty changed set -> empty manifest, not an error', () => {
   const m = buildManifest([], detectProfiles([], null));
   assert.deepEqual(m, { changedFiles: [], profiles: [] });
+});
+
+// ── Task 4: validateExtraction ─────────────────────────────────────────────
+
+test('validateExtraction: valid items pass through normalized (title/source trimmed, note defaulted)', () => {
+  const { valid, skippedDone, errors } = validateExtraction([
+    { title: '  Wire retry  ', source: ' docs/plans/m4.md#task-3 ', note: 'from M4 plan' },
+    { title: 'No note item', source: 'TODO.md' },
+  ]);
+  assert.equal(errors.length, 0);
+  assert.equal(skippedDone.length, 0);
+  assert.deepEqual(valid[0], { title: 'Wire retry', note: 'from M4 plan', source: 'docs/plans/m4.md#task-3' });
+  assert.deepEqual(valid[1], { title: 'No note item', note: '', source: 'TODO.md' });
+});
+
+test('validateExtraction: done:true routed to skippedDone, never valid', () => {
+  const { valid, skippedDone } = validateExtraction([
+    { title: 'Already shipped', source: 'TODO.md', done: true },
+  ]);
+  assert.equal(valid.length, 0);
+  assert.deepEqual(skippedDone, [{ title: 'Already shipped', source: 'TODO.md' }]);
+});
+
+test('validateExtraction: missing/empty title or source -> error (fail-closed signal)', () => {
+  const { errors } = validateExtraction([
+    { source: 'TODO.md' },                  // no title
+    { title: '   ', source: 'TODO.md' },    // blank title
+    { title: 'No source' },                 // no source
+    { title: 'Blank source', source: '' },  // blank source
+  ]);
+  assert.equal(errors.length, 4);
+  for (const e of errors) {
+    assert.equal(typeof e.index, 'number');
+    assert.equal(typeof e.error, 'string');
+  }
+});
+
+test('validateExtraction: non-array and non-object items refused', () => {
+  assert.equal(validateExtraction('nope').errors.length, 1);
+  assert.equal(validateExtraction(null).errors.length, 1);
+  assert.equal(validateExtraction([null, 'str', 42]).errors.length, 3);
+});
+
+test('validateExtraction: empty array -> clean no-op shape', () => {
+  assert.deepEqual(validateExtraction([]), { valid: [], skippedDone: [], errors: [] });
 });
