@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PROFILES } from '../scripts/lib/profiles.mjs';
+import { contentHash, detectProfiles } from '../scripts/lib/sources.mjs';
 
 test('PROFILES ships superpowers, gsd, generic — generic LAST (first-match-wins attribution)', () => {
   assert.deepEqual(PROFILES.map((p) => p.name), ['superpowers', 'gsd', 'generic']);
@@ -24,8 +25,6 @@ test('generic has no detect dir (always active); the skill profiles do', () => {
   assert.equal(byName.superpowers.detect, 'docs/superpowers');
   assert.equal(byName.gsd.detect, '.planning');
 });
-
-import { contentHash, detectProfiles } from '../scripts/lib/sources.mjs';
 
 test('contentHash: 12 hex chars, stable, content-sensitive', () => {
   const h = contentHash('hello');
