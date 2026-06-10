@@ -608,6 +608,62 @@ export async function syncScan(ctx) {
 }
 
 /**
+ * syncRecord(ctx) — record the LLM's extraction into the ledger, fail-closed.
+ *
+ * - Refuses the WHOLE run (zero appends, no ledger created) on any structurally
+ *   invalid item.
+ * - done:true items -> skippedDone (never appended; ledger collects intent).
+ * - Appends via appendCandidate -> content-hash candidateId dedup (re-recording
+ *   the same extraction is a no-op; report.deduped).
+ * - AFTER all appends succeed, re-hashes every watched file and updates
+ *   ledger.sources wholesale (the scan->record cycle settles the watch set;
+ *   a file edited BETWEEN scan and record is marked synced unread — narrow
+ *   accepted window, same class as M3a's create->persist gap; the next edit
+ *   re-flags it).
+ *
+ * @param {object} ctx { dir, config?, extracted }  extracted = parsed extraction JSON
+ * @returns {Promise<{report:object, say:string}>}
+ */
+export async function syncRecord(ctx) {
+  const dir = ctx.dir || process.cwd();
+  const { valid, skippedDone, errors } = validateExtraction(ctx.extracted);
+  if (errors.length) {
+    throw new Error(`sync: refused — ${errors.length} invalid extraction item(s): ` +
+      errors.map((e) => `${e.index ?? '?'}: ${e.error}`).join('; '));
+  }
+
+  // Append (dedup by content-hash id). ensureLedger only AFTER validation passes.
+  await ensureLedger(dir);
+  const added = [];
+  const deduped = [];
+  for (const item of valid) {
+    const id = candidateId(item.title);
+    const before = await readLedger(dir);
+    if (before.candidates.some((c) => c.id === id)) {
+      deduped.push({ candidateId: id, title: item.title });
+      continue;
+    }
+    await appendCandidate(dir, { title: item.title, note: item.note, source: item.source });
+    added.push({ candidateId: id, title: item.title, source: item.source });
+  }
+
+  // Persist-after-success: settle the watch set's hashes only once appends are done.
+  const profiles = detectProfiles(presentDetectDirs(dir), ctx.config || null);
+  const currentHashes = await hashWatched(dir, profiles);
+  const ledger = await readLedger(dir);
+  ledger.sources = ledger.sources || {};
+  const syncedAt = new Date().toISOString();
+  for (const [path, info] of Object.entries(currentHashes)) {
+    ledger.sources[path] = { hash: info.hash, syncedAt, profile: info.profile };
+  }
+  await writeLedger(dir, ledger);
+
+  const report = { added, deduped, skippedDone, errors: [] };
+  const say = `Sync: added ${added.length} candidate(s); ${deduped.length} deduped, ${skippedDone.length} done item(s) skipped.`;
+  return { report, say };
+}
+
+/**
  * promotePlan(ctx) — classify the ledger's mapped/needs-decision candidates into
  * promotion buckets. Read-only (no board, no ledger writes).
  * @param {object} ctx { dir, config }

@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
-import { presentDetectDirs, expandWatch, hashWatched, syncScan } from '../scripts/board-manager.mjs';
+import { presentDetectDirs, expandWatch, hashWatched, syncScan, syncRecord } from '../scripts/board-manager.mjs';
 import { detectProfiles } from '../scripts/lib/sources.mjs';
-import { ensureLedger, readLedger, writeLedger } from '../scripts/lib/ledger.mjs';
+import { ensureLedger, readLedger, writeLedger, appendCandidate } from '../scripts/lib/ledger.mjs';
 
 const tmp = () => mkdtempSync(join(os.tmpdir(), 'gbs-sync-'));
 
@@ -105,4 +105,104 @@ test('syncScan: config.sources.disable suppresses a profile end-to-end', async (
   seedRepo(dir);
   const { manifest } = await syncScan({ dir, config: { sources: { disable: ['superpowers'] } } });
   assert.deepEqual(manifest.changedFiles.map((f) => f.path), ['TODO.md']);
+});
+
+const EXTRACT = [
+  { title: 'Build the thing', note: 'from p1.md Task 1', source: 'docs/superpowers/plans/p1.md#task-1' },
+  { title: 'fix the roof', source: 'TODO.md' },
+];
+
+test('syncRecord: appends candidates with provenance, then updates ledger.sources hashes', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  const { report, say } = await syncRecord({ dir, config: null, extracted: EXTRACT });
+  assert.equal(report.added.length, 2);
+  assert.equal(report.deduped.length, 0);
+
+  const ledger = await readLedger(dir);
+  assert.equal(ledger.candidates.length, 2);
+  const cand = ledger.candidates.find((c) => c.title === 'Build the thing');
+  assert.equal(cand.status, 'candidate');
+  assert.equal(cand.source, 'docs/superpowers/plans/p1.md#task-1');
+  assert.equal(cand.note, 'from p1.md Task 1');
+
+  // sources hashes were written for ALL watched files (scan -> record settles the set)
+  assert.ok(ledger.sources['TODO.md'].hash.match(/^[0-9a-f]{12}$/));
+  assert.ok(ledger.sources['docs/superpowers/plans/p1.md']);
+  assert.equal(ledger.sources['TODO.md'].profile, 'generic');
+  assert.match(say, /added 2 candidate/i);
+});
+
+test('syncRecord: full-loop idempotency — record then scan = empty; re-record dedupes all', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  await syncRecord({ dir, config: null, extracted: EXTRACT });
+
+  const rescan = await syncScan({ dir, config: null });
+  assert.equal(rescan.manifest.changedFiles.length, 0); // layer 2
+
+  const again = await syncRecord({ dir, config: null, extracted: EXTRACT });
+  assert.equal(again.report.added.length, 0);            // layer 1
+  assert.equal(again.report.deduped.length, 2);
+  assert.equal((await readLedger(dir)).candidates.length, 2);
+});
+
+test('syncRecord: done items skipped (reported), never appended', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  const { report } = await syncRecord({ dir, config: null, extracted: [
+    { title: 'done thing', source: 'TODO.md', done: true },
+    { title: 'live thing', source: 'TODO.md' },
+  ] });
+  assert.deepEqual(report.skippedDone, [{ title: 'done thing', source: 'TODO.md' }]);
+  assert.equal(report.added.length, 1);
+  const titles = (await readLedger(dir)).candidates.map((c) => c.title);
+  assert.deepEqual(titles, ['live thing']);
+});
+
+test('syncRecord: fail-closed — one invalid item refuses the WHOLE run, ledger untouched', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  await assert.rejects(
+    () => syncRecord({ dir, config: null, extracted: [
+      { title: 'good item', source: 'TODO.md' },
+      { title: '', source: 'TODO.md' },          // invalid
+    ] }),
+    /refused/,
+  );
+  assert.equal(await readLedger(dir), null); // zero appends, no ledger created
+});
+
+test('syncRecord: non-array extraction refused the same way', async () => {
+  const dir = tmp();
+  await assert.rejects(() => syncRecord({ dir, config: null, extracted: { not: 'array' } }), /refused/);
+});
+
+test('syncRecord: crash window — appended but hashes not updated -> rescan re-flags, re-record dedupes clean', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  await syncRecord({ dir, config: null, extracted: EXTRACT });
+
+  // simulate the crash: wipe the hash bookkeeping, keep the candidates
+  const ledger = await readLedger(dir);
+  ledger.sources = {};
+  await writeLedger(dir, ledger);
+
+  const rescan = await syncScan({ dir, config: null });
+  assert.equal(rescan.manifest.changedFiles.length, 2);  // re-flagged
+
+  const redo = await syncRecord({ dir, config: null, extracted: EXTRACT });
+  assert.equal(redo.report.added.length, 0);
+  assert.equal(redo.report.deduped.length, 2);            // no duplicate candidates
+  assert.equal((await readLedger(dir)).candidates.length, 2);
+});
+
+test('syncRecord: dedup against candidates added via `ledger add` too (same content hash)', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  await ensureLedger(dir);
+  await appendCandidate(dir, { title: 'fix the roof', source: 'manual' });
+  const { report } = await syncRecord({ dir, config: null, extracted: [{ title: 'fix the roof', source: 'TODO.md' }] });
+  assert.equal(report.added.length, 0);
+  assert.equal(report.deduped.length, 1);
 });
