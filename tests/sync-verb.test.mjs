@@ -206,3 +206,19 @@ test('syncRecord: dedup against candidates added via `ledger add` too (same cont
   assert.equal(report.added.length, 0);
   assert.equal(report.deduped.length, 1);
 });
+
+test('syncScan: unsupported user glob is surfaced as ignored, never crashes', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  const { manifest, say } = await syncScan({ dir, config: { sources: { watch: ['docs/*.md', 42] } } });
+  assert.equal(manifest.ignoredPatterns.length, 2);
+  assert.deepEqual(manifest.ignoredPatterns.map((i) => i.pattern), ['docs/*.md', '42']);
+  assert.match(say, /2 unsupported watch pattern\(s\) ignored/);
+});
+
+test('syncScan: no ignored patterns -> manifest shape unchanged (no ignoredPatterns key)', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  const { manifest } = await syncScan({ dir, config: null });
+  assert.equal(manifest.ignoredPatterns, undefined);
+});

@@ -549,6 +549,7 @@ async function walkFiles(base) {
 export async function expandWatch(dir, patterns) {
   const found = [];
   for (const pattern of patterns || []) {
+    if (typeof pattern !== 'string') continue;
     const m = WATCH_GLOB_RE.exec(pattern);
     if (m) {
       const ext = m[2];
@@ -574,15 +575,25 @@ export async function expandWatch(dir, patterns) {
  * @param {object[]} profiles  detectProfiles output
  * @returns {Promise<Record<string,{hash:string,profile:string}>>}
  */
-export async function hashWatched(dir, profiles) {
-  const out = {};
+export async function hashWatched(dir, profiles, opts = {}) {
+  const attributed = [];
+  const seen = new Set();
   for (const profile of profiles || []) {
     for (const path of await expandWatch(dir, profile.watch)) {
-      if (out[path]) continue; // already attributed to an earlier (more specific) profile
-      const text = await readFile(join(dir, path), 'utf8').catch(() => null);
-      if (text === null) continue; // vanished between walk and read -> skip
-      out[path] = { hash: contentHash(text), profile: profile.name };
+      if (seen.has(path)) continue; // already attributed to an earlier (more specific) profile
+      seen.add(path);
+      attributed.push({ path, profile: profile.name });
     }
+  }
+  const max = opts.maxFiles ?? Infinity;
+  if (attributed.length > max) {
+    throw new Error(`hashWatched: ${attributed.length} watched file(s) exceeds cap ${max}`);
+  }
+  const out = {};
+  for (const { path, profile } of attributed) {
+    const text = await readFile(join(dir, path), 'utf8').catch(() => null);
+    if (text === null) continue; // vanished between walk and read -> skip
+    out[path] = { hash: contentHash(text), profile };
   }
   return out;
 }
@@ -597,13 +608,26 @@ export async function hashWatched(dir, profiles) {
 export async function syncScan(ctx) {
   const dir = ctx.dir || process.cwd();
   const profiles = detectProfiles(presentDetectDirs(dir), ctx.config || null);
-  const currentHashes = await hashWatched(dir, profiles);
+  // Unsupported/invalid watch patterns are surfaced, not silently swallowed.
+  const ignoredPatterns = [];
+  for (const p of profiles) {
+    for (const pat of p.watch) {
+      if (typeof pat !== 'string' || (pat.includes('*') && !WATCH_GLOB_RE.test(pat))) {
+        ignoredPatterns.push({ profile: p.name, pattern: String(pat) });
+      }
+    }
+  }
+  const currentHashes = await hashWatched(dir, profiles, { maxFiles: ctx.maxFiles });
   const ledger = await readLedger(dir); // null is fine — first scan
   const { changed, unchanged } = diffSources(currentHashes, (ledger && ledger.sources) || null);
   const manifest = buildManifest(changed, profiles);
-  const say = changed.length
+  let say = changed.length
     ? `Sync scan: ${changed.length} changed source file(s) across ${manifest.profiles.length} profile(s); ${unchanged.length} unchanged.`
     : `Sync scan: all sources unchanged (${unchanged.length} file(s) watched).`;
+  if (ignoredPatterns.length) {
+    manifest.ignoredPatterns = ignoredPatterns;
+    say += ` ${ignoredPatterns.length} unsupported watch pattern(s) ignored.`;
+  }
   return { manifest, say };
 }
 
