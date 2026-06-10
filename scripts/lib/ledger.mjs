@@ -33,6 +33,7 @@ function defaultLedger() {
       pullCadence: 'session-start',
     },
     candidates: [],
+    sources: {},
   };
 }
 

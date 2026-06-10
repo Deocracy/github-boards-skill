@@ -18,6 +18,10 @@
   "projectUrl": "https://github.com/orgs/your-org/projects/23",
   "pushPolicy": "on-approval",
   "pullCadence": "session-start",
+  "sources": {
+    "watch": [],
+    "disable": []
+  },
   "rules": {
     "maxLanes": 8,
     "useTags": false,

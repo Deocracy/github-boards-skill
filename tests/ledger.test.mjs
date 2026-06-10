@@ -72,3 +72,9 @@ test('readLedger throws a clear error on malformed JSON', async () => {
   await writeFile(join(dir, '.github-boards', 'ledger.json'), '{ bad', 'utf8');
   await assert.rejects(() => readLedger(dir), (e) => e.message.includes('malformed JSON'));
 });
+
+test('fresh ledger carries an empty sources map (M3b change-detection state)', async () => {
+  const dir = mkdtempSync(join(os.tmpdir(), 'gbs-ledger-src-'));
+  const l = await ensureLedger(dir);
+  assert.deepEqual(l.sources, {});
+});

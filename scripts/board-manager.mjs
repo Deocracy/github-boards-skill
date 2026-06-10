@@ -928,7 +928,7 @@ function makeRealEngine(eng, cfg) {
  * Minimal CLI arg parse: <verb> [--staged] [--config <path>] [verb args...]
  */
 function parseCliArgs(argv) {
-  const out = { verb: null, staged: false, config: null, preset: null, title: null, repo: null, session: null, proposals: null, decisions: null, rest: [] };
+  const out = { verb: null, staged: false, config: null, preset: null, title: null, repo: null, session: null, proposals: null, decisions: null, extracted: null, rest: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--staged') out.staged = true;
@@ -939,6 +939,7 @@ function parseCliArgs(argv) {
     else if (a === '--session') out.session = argv[++i];
     else if (a === '--proposals') out.proposals = argv[++i];
     else if (a === '--decisions') out.decisions = argv[++i];
+    else if (a === '--extracted') out.extracted = argv[++i];
     else if (!out.verb) out.verb = a;
     else out.rest.push(a);
   }
@@ -946,7 +947,7 @@ function parseCliArgs(argv) {
 }
 
 async function cli() {
-  const { verb, staged, config: configPath, preset, title, repo, session, proposals, decisions: decisionsPath, rest } = parseCliArgs(process.argv.slice(2));
+  const { verb, staged, config: configPath, preset, title, repo, session, proposals, decisions: decisionsPath, extracted, rest } = parseCliArgs(process.argv.slice(2));
 
   if (!verb || verb === '--help' || verb === 'help') {
     console.log(`board-manager.mjs — conversational board verbs
@@ -965,6 +966,8 @@ async function cli() {
   map record --proposals <file>       validate + record the mapper's proposals into the ledger
   promote plan                          classify mapped candidates into promotion buckets (read-only)
   promote apply [--decisions <file>]    promote confident + decided candidates to the board (idempotent)
+  sync scan                             what changed in watched source files (read-only)
+  sync record --extracted <file>        record the LLM's extracted work items into the ledger
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -1006,6 +1009,30 @@ async function cli() {
     console.log(result.say);
     if (!staged) console.log(JSON.stringify(result, null, 2));
     return;
+  }
+
+  // sync runs WITHOUT an existing board.json (Tier-0): read board.json RAW if
+  // present (only the optional `sources` block matters here) — never loadConfig.
+  if (verb === 'sync') {
+    const sub = rest[0];
+    const { readFile: rf } = await import('node:fs/promises');
+    let rawCfg = null;
+    try { rawCfg = JSON.parse(await rf(join(process.cwd(), 'board.json'), 'utf8')); } catch { rawCfg = null; }
+    if (sub === 'scan' || !sub) {
+      const r = await syncScan({ dir: process.cwd(), config: rawCfg });
+      console.log(r.say);
+      console.log(JSON.stringify(r.manifest, null, 2));
+      return;
+    }
+    if (sub === 'record') {
+      if (!extracted) throw new Error('usage: sync record --extracted <path-to-extraction.json>');
+      const items = JSON.parse(await rf(extracted, 'utf8'));
+      const r = await syncRecord({ dir: process.cwd(), config: rawCfg, extracted: items });
+      console.log(r.say);
+      console.log(JSON.stringify(r.report, null, 2));
+      return;
+    }
+    throw new Error('usage: sync <scan|record> [--extracted <file>]');
   }
 
   // The verb-layer config (preset + routing) comes from scripts/lib/config.mjs.
