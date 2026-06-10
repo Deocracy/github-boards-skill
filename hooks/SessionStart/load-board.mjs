@@ -26,6 +26,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ensureLedger as defaultEnsureLedger, readLedger as defaultReadLedger } from '../../scripts/lib/ledger.mjs';
+import { readFile } from 'node:fs/promises';
 
 /**
  * Default dependency: does <cwd>/board.json exist?
@@ -72,6 +73,21 @@ export async function defaultRunSummary(cwd) {
 }
 
 /**
+ * Default dependency: how many watched source files changed since the last
+ * sync? Runs the read-only syncScan (glob + hash + diff — no LLM, no writes).
+ * May throw freely; decide() swallows.
+ * @param {string} cwd
+ * @returns {Promise<number>}
+ */
+export async function defaultScanSources(cwd) {
+  const { syncScan } = await import('../../scripts/board-manager.mjs');
+  let rawCfg = null;
+  try { rawCfg = JSON.parse(await readFile(join(cwd, 'board.json'), 'utf8')); } catch { rawCfg = null; }
+  const r = await syncScan({ dir: cwd, config: rawCfg });
+  return r.manifest.changedFiles.length;
+}
+
+/**
  * PURE-ish decision: given the hook input and injected deps, decide what context
  * (if any) to inject. NEVER throws — on any failure it returns null (degrade).
  *
@@ -84,6 +100,7 @@ export async function decide(input, deps = {}) {
   const runSummary = deps.runSummary || defaultRunSummary;
   const ensureLedgerFn = deps.ensureLedger || defaultEnsureLedger;
   const readLedgerFn = deps.readLedger || defaultReadLedger;
+  const scanSourcesFn = deps.scanSources || defaultScanSources;
 
   const cwd = (input && input.cwd) || process.cwd();
 
@@ -104,10 +121,15 @@ export async function decide(input, deps = {}) {
     try { say = await runSummary(cwd); } catch { say = null; }
   }
 
+  // M3b: changed watched-source files since last sync. Read-only; degrade to 0.
+  let changedSources = 0;
+  try { changedSources = await scanSourcesFn(cwd); } catch { changedSources = 0; }
+
   // Compose. Stay silent (return null) only when there's nothing meaningful.
   const parts = [];
   if (say && typeof say === 'string' && say.trim()) parts.push(`GitHub board status: ${say.trim()}`);
   if (candidateCount > 0) parts.push(`github-boards ledger: ${candidateCount} candidate(s) not yet on the board.`);
+  if (changedSources > 0) parts.push(`github-boards sources: ${changedSources} source file(s) changed since last sync — run 'sync scan' then 'sync record' to ingest.`);
   if (parts.length === 0) return null;
   return { additionalContext: parts.join(' ') };
 }
