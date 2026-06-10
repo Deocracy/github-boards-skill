@@ -588,6 +588,26 @@ export async function hashWatched(dir, profiles) {
 }
 
 /**
+ * syncScan(ctx) — what changed in the watched source files since the last sync?
+ * READ-ONLY: no ledger writes (never even creates one), no board, no LLM.
+ * The returned manifest is the packet Claude extracts from (lib/sources.buildManifest).
+ * @param {object} ctx { dir, config? }  config = RAW board.json or null (sources block only)
+ * @returns {Promise<{manifest:object, say:string}>}
+ */
+export async function syncScan(ctx) {
+  const dir = ctx.dir || process.cwd();
+  const profiles = detectProfiles(presentDetectDirs(dir), ctx.config || null);
+  const currentHashes = await hashWatched(dir, profiles);
+  const ledger = await readLedger(dir); // null is fine — first scan
+  const { changed, unchanged } = diffSources(currentHashes, (ledger && ledger.sources) || null);
+  const manifest = buildManifest(changed, profiles);
+  const say = changed.length
+    ? `Sync scan: ${changed.length} changed source file(s) across ${manifest.profiles.length} profile(s); ${unchanged.length} unchanged.`
+    : `Sync scan: all sources unchanged (${unchanged.length} file(s) watched).`;
+  return { manifest, say };
+}
+
+/**
  * promotePlan(ctx) — classify the ledger's mapped/needs-decision candidates into
  * promotion buckets. Read-only (no board, no ledger writes).
  * @param {object} ctx { dir, config }
