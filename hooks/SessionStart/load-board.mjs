@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 // hooks/SessionStart/load-board.mjs
 //
-// Claude Code SessionStart hook. On session start/resume, if the project has a
-// board configured (a board.json in the session cwd), run a read-only board
-// `summary` and inject its `say` line as additionalContext so Claude opens the
-// session already knowing what changed on the board.
+// Claude Code SessionStart hook. On session start/resume the hook injects up to
+// three signals as additionalContext so Claude opens the session already aware of
+// project state:
+//   (1) Board summary — if a board.json is present, runs a read-only `summary`
+//       and injects its `say` line describing what changed on the GitHub board.
+//   (2) Ledger candidate count — reads (or initialises) the local ledger and
+//       reports how many candidates are not yet promoted to the board.
+//   (3) Changed watched-source files count (M3b) — runs a read-only `syncScan`
+//       (glob + hash + diff, no LLM, no writes) and reports how many watched
+//       source files have changed since the last sync.
+// Signals that have nothing to report are omitted; if all three are empty the
+// hook exits 0 with no context injected.
 //
 // GRACEFUL DEGRADE (the load-bearing rule): if there is NO board.json, or the
 // board is unreachable (gh not authed, network down, malformed config — anything),
@@ -19,8 +27,9 @@
 //   - To inject nothing, print nothing (and exit 0).
 //
 // TESTABILITY: the pure decision is `decide(input, deps)` -> { additionalContext }
-// or null. `deps` injects { hasBoard(cwd), runSummary(cwd) } so tests never touch
-// the filesystem, gh, or the real engine. main() is the thin stdin/stdout shim.
+// or null. `deps` injects { hasBoard(cwd), runSummary(cwd), ensureLedger(cwd),
+// readLedger(cwd), scanSources(cwd) } so tests never touch the filesystem, gh,
+// or the real engine. main() is the thin stdin/stdout shim.
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
