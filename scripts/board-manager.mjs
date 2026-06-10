@@ -20,13 +20,16 @@
 //   config = { projectId, stageFieldId, stageOptions, routing:{agent,human}, preset:{name,kind,lanes:[{name,terminal}],...} }
 
 import { pathToFileURL } from 'node:url';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, readFile, readdir, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadPreset, laneNames } from './lib/presets.mjs';
 import { readState, writeState, diff } from './lib/state.mjs';
-import { ensureLedger, readLedger, writeLedger, appendCandidate, setIntent } from './lib/ledger.mjs';
+import { ensureLedger, readLedger, writeLedger, appendCandidate, setIntent, candidateId } from './lib/ledger.mjs';
 import { prepareInput, applyProposals } from './lib/mapper.mjs';
 import { classify, resolveDecisions, cidMarker } from './lib/promote.mjs';
+import { PROFILES } from './lib/profiles.mjs';
+import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction } from './lib/sources.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -494,6 +497,92 @@ export async function mapRecord(ctx) {
 function bodyFor(cand, cid) {
   const note = cand && cand.note ? String(cand.note).trim() : '';
   return note ? `${note}\n\n${cidMarker(cid)}` : cidMarker(cid);
+}
+
+// ===========================================================================
+// M3b SYNC — fs side. The pure logic lives in lib/sources.mjs; these helpers
+// do the only fs work: presence checks, watch-glob expansion, content hashing.
+// ===========================================================================
+
+/**
+ * Which profile detect dirs exist under `dir`? (Input to detectProfiles.)
+ * @param {string} dir
+ * @returns {string[]} repo-relative dirs present
+ */
+export function presentDetectDirs(dir) {
+  return PROFILES
+    .filter((p) => p.detect !== null && existsSync(join(dir, p.detect)))
+    .map((p) => p.detect);
+}
+
+// Supported watch-pattern forms (all three shipped profiles + user globs):
+//   literal file path           e.g. "TODO.md"
+//   <base>/**/*.<ext>           e.g. "docs/superpowers/plans/**/*.md"
+const WATCH_GLOB_RE = /^(.+)\/\*\*\/\*(\.[A-Za-z0-9]+)$/;
+
+/** Recursive file walk. Missing dir -> []. */
+async function walkFiles(base) {
+  let entries;
+  try {
+    entries = await readdir(base, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const e of entries) {
+    const p = join(base, e.name);
+    if (e.isDirectory()) out.push(...(await walkFiles(p)));
+    else if (e.isFile()) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * Expand watch patterns to repo-relative POSIX paths (deduped, sorted).
+ * Unsupported pattern forms match nothing (never throw).
+ * @param {string} dir       repo root
+ * @param {string[]} patterns
+ * @returns {Promise<string[]>}
+ */
+export async function expandWatch(dir, patterns) {
+  const found = [];
+  for (const pattern of patterns || []) {
+    const m = WATCH_GLOB_RE.exec(pattern);
+    if (m) {
+      const ext = m[2];
+      for (const f of await walkFiles(join(dir, m[1]))) {
+        if (f.endsWith(ext)) found.push(f);
+      }
+    } else if (!pattern.includes('*')) {
+      try {
+        const s = await stat(join(dir, pattern));
+        if (s.isFile()) found.push(join(dir, pattern));
+      } catch { /* missing literal -> skip */ }
+    }
+    // other glob forms: unsupported -> match nothing
+  }
+  const rel = found.map((f) => f.slice(dir.length + 1).replace(/\\/g, '/'));
+  return [...new Set(rel)].sort();
+}
+
+/**
+ * Hash every watched file's content. First-match-wins profile attribution
+ * (profiles arrive in PROFILES order — specific first, generic last).
+ * @param {string} dir
+ * @param {object[]} profiles  detectProfiles output
+ * @returns {Promise<Record<string,{hash:string,profile:string}>>}
+ */
+export async function hashWatched(dir, profiles) {
+  const out = {};
+  for (const profile of profiles || []) {
+    for (const path of await expandWatch(dir, profile.watch)) {
+      if (out[path]) continue; // already attributed to an earlier (more specific) profile
+      const text = await readFile(join(dir, path), 'utf8').catch(() => null);
+      if (text === null) continue; // vanished between walk and read -> skip
+      out[path] = { hash: contentHash(text), profile: profile.name };
+    }
+  }
+  return out;
 }
 
 /**
