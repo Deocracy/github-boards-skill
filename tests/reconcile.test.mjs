@@ -59,6 +59,18 @@ test('CRASH-ORPHAN: even a dismissed candidate with a live marker is settled (bo
   assert.equal(d.safeHeals[0].kind, 'crash-orphan');
 });
 
+test('CRASH-ORPHAN: merged/split statuses with a live marker also settle (any non-promoted status)', () => {
+  for (const status of ['merged', 'split']) {
+    const d = classifyDrift({
+      ledger: { candidates: [cand(CID_A, { status })] },
+      items: [item(CID_A)],
+      sourceExists: exists,
+    });
+    assert.equal(d.safeHeals.length, 1, `status ${status} should settle`);
+    assert.equal(d.safeHeals[0].kind, 'crash-orphan');
+  }
+});
+
 test('UNKNOWN-MARKER: live marker, no candidate at all -> safe adopt carrying the live title', () => {
   const d = classifyDrift({
     ledger: { candidates: [] },
