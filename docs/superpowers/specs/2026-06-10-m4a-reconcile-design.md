@@ -151,3 +151,13 @@ No lane/owner overrides here (unlike promote's) — a `re-promote` re-enters the
 | **M4b · Time-travel** | Versioned board snapshots, diff/restore | backlog |
 | **M5 · Skill layer** | SKILL.md, triggering, evals — incl. retitle-ghost judgment + board→source writeback | backlog |
 | **M6 · Verification & simulation** | Unit + simulation + live integration | seeded by M1–M4 |
+
+## 11. M6 addendum (2026-06-11)
+
+**Vanished-class widening (commit dbb00a0).** The original spec defined the `vanished` class as: `candidate status === 'promoted'` with `promotion.issueNumber`, but no live item carries its marker or issueNumber. This covered only *fully promoted* cards that disappeared after the fact.
+
+M6 verification surfaced a gap: a mid-promote partial whose `setStage` crashed leaves the candidate with `status = 'mapped'` and full refs including `itemId` (the card was added to the board before the crash). If a user then archives that card via the GitHub UI, the previous `classifyDrift` logic never matched it — the card was silently unresumable.
+
+The widened definition, now live in `scripts/lib/reconcile.mjs`: **any candidate with `promotion.itemId` set, whose marker has left the board (not found in `listItemsWithBodies`), and whose status is not `dismissed`, is classified `vanished`** — regardless of whether status is `promoted` or `mapped`. The same three actions apply: `re-promote | dismiss | keep`.
+
+This was a product fix, not a test-only change. The same `classifyDrift` that M4a ships uses this wider guard. Invariant 2 (`checkInvariants`) was updated in parallel: refs-bearing (`itemId` set) non-final candidates must appear in either `resumePending` or `uncertain.vanished`; off-board partials where `itemId == null` (A2 window) remain invisible to board-scoped reconcile by design.

@@ -58,17 +58,17 @@ tests/helpers/sim-world.mjs
                                 in the soak)
 ```
 
-**Crash semantics (the reachable-states rule, operationalized):** crash windows are produced ONLY by (a) one-shot engine-op throws (`failNext`) that make the real verb throw mid-sequence, or (b) the lib seams that already exist (mkdir-as-file sabotage, log-path-as-directory). The world catches the verb's throw, marks the session crashed, and the next `newSession()` asserts recoverability. Persisted state is never hand-mutated.
+**Crash semantics (the reachable-states rule, operationalized):** crash windows are produced ONLY by (a) one-shot engine-op throws (`failNext`) that make the real verb throw mid-sequence, or (b) the lib seams that already exist (mkdir-as-file sabotage, log-path-as-directory). The world catches the verb's throw, marks the session crashed, and the next `newSession()` asserts recoverability. Persisted state is never hand-mutated. **Sim-world facts:** faults are one-shot — `failNext` fires exactly once; `crashedPromote` calls `faults.clearFaults()` in its `finally` block so any unconsumed fault (e.g. an A3 partial whose resume path skips `addIssueToBoard`) cannot leak onto a later innocent operation. The soak trace is replayable only by re-running the same seed end-to-end — there is no minimization framework (the seed + op trace IS the repro).
 
 ## 4. The invariants
 
 Checked after every soak step and at scenario checkpoints. Violation → throw with label + ids.
 
 1. **No duplicate cards** — at most one board card per ledger candidate (cid marker uniqueness across `listItemsWithBodies`).
-2. **Ledger↔board consistency** — every `promoted` candidate's refs resolve to an existing card; no `pending` candidate carries live refs without being classifiable as resume-pending (reconcile must report it, never settle it).
+2. **Ledger↔board consistency** — every refs-bearing (`itemId` set) non-final candidate must be classified either resume-pending (card still on board) or vanished (card archived/deleted via the GitHub UI) — never silent. Off-board partials where `itemId == null` (A2 window) are invisible to board-scoped `classifyDrift` by design and are legal; `promote apply` resumes them.
 3. **Journal integrity** — `log.jsonl` line count never decreases; one line per non-skipped snapshot write; every line parses (torn lines only via injected faults, and then counted by `readLog`).
-4. **Snapshot store sanity** — snapshot file count ≤ keep; the newest snapshot's `itemsHash` equals the live board's normalized hash iff a fresh write would dedup-skip.
-5. **State honesty** — `state.json` reflects the last *completed* summary's view of the board.
+4. **Snapshot store sanity** — snapshot file count ≤ keep (monotone cap). The full dedup-iff (same content → no new snapshot) is exercised by the B-row scenarios and the long-week idle assertion; this invariant asserts only the simpler bound.
+5. **State honesty** — `state.json` parses as valid JSON and each item carries the expected `{lane, labels, owner}` structure (pass-on-mock / break-on-live guard); reflects the last *completed* summary's view.
 6. **Undo soundness** — after `undoTo(ref)` executes its ops, re-running invert against the SAME pinned ref yields zero remaining ops for surviving cards.
 
 ## 5. The crash atlas
@@ -77,22 +77,24 @@ Every multi-write sequence and every gap; one recovery scenario per row. (Sequen
 
 | # | Sequence (owner) | Window: crash after… | Required recovery (next session) |
 |---|---|---|---|
-| A1 | promote apply per-item: createIssue → addIssueToBoard → setStage → setLabels → ledger persist | createIssue (nothing persisted, issue exists) | reconcile classifies crash-orphan/unknown-marker (refs absent) → safe heal; re-promote files NO duplicate (cid marker found on board) |
-| A2 | 〃 | addIssueToBoard + refs persist (stage/labels unrun) | reconcile: resume-pending → report-only; `promote apply` resumes the SAME card, completing stage+labels |
+| A1 | promote apply per-item: createIssue → addIssueToBoard → setStage → setLabels → ledger persist | createIssue (nothing persisted, issue exists off-board) | orphan issue lives off-board; board-scoped `classifyDrift` cannot see it (accepted loss, documented). Recovery: fresh re-promote lands exactly one card (cid marker found, no duplicate); reconcile is not involved. |
+| A2 | 〃 | addIssueToBoard + refs persist (stage/labels unrun) | refs are in the ledger but the card is off-board — board-scoped reconcile sees clean (by design: `itemId == null`); `promote apply` resumes the SAME card completing stage+labels, same issue resumed. |
 | A3 | 〃 | setStage (labels unrun) | as A2 — resume completes labels only; no second issue |
 | A4 | 〃 batch | between item N and N+1 | items ≤N promoted exactly once; N+1 promotes on resume |
+| A3-then-archive | mid-promote partial (setStage crash): card on board, laneless; status mapped + full refs (itemId set); user then archives the card via the GitHub UI | card has left the board by the time reconcile runs | previously silent + unresumable; M6 product fix (commit dbb00a0): `classifyDrift` vanished class widened — any candidate with `promotion.itemId` whose marker left the board and whose status ≠ dismissed is classified vanished and offered re-promote \| dismiss \| keep. |
 | B1 | writeSnapshot: file write → log append → prune | file write (append fails) | M4b rollback re-proved through the world: orphan unlinked, retry records the event |
 | B2 | 〃 | log append (prune fails) | store may exceed keep transiently; next successful write prunes; journal intact |
 | C1 | syncRecord: per-candidate ledger appends + hash/manifest settlement | mid-batch | re-run records only missing items (coverage-gated hashes); no duplicate candidates |
-| D1 | summary: writeState → teamSync write → snapshot piggyback | writeState (piggyback fails) | non-fatal by design; next session diffs correctly from the state that DID persist |
+| D1 | summary: writeState → snapshot piggyback | writeState (piggyback fails) | non-fatal by design; next session diffs correctly from the state that DID persist. Scope: snapshot-piggyback failure only — `teamSync` sits outside this non-fatal guard and is not exercised by M6 config. |
 | E1 | undo execution: move ops → route ops | between ops | re-running invert vs the SAME pinned anchor proposes only the remainder |
 
 ## 6. Scenarios & soak
 
-**`tests/sim-scenarios.test.mjs`** — the nine atlas rows plus three composition stories:
+**`tests/sim-scenarios.test.mjs`** — the atlas rows plus four composition stories:
 - **The anchor-trap session:** session 1 promotes + snapshots; user mutates; session 2 starts (hook re-snapshots the mutated board); undo via pinned older ref succeeds; undo via `latest` yields the empty plan WITH the anchor-trap hint in the say.
 - **The long week:** 5 sessions of mixed pipeline runs + human edits (moves, flips, an archive, a retitle); each session's summary diff is consistent with the journal's account; `snapshot log` tells the same story end-to-end.
-- **The messy repo:** TODO edits + a deleted source file + a dismissed-but-live card; reconcile heals the ledger only (board write-ops asserted zero), and the heal is self-extinguishing (second scan clean).
+- **The messy repo:** two promoted cards; user archives one and ledger-dismisses the other (a dismissed-but-live card + a vanished card). `reconcileScan` detects both; operator keeps both (`keep` decisions). Board write-ops are asserted zero — reconcile heals the ledger only. Heal is self-extinguishing: second scan clean, dismissal preserved.
+- **Heal-for-real:** a separate story exercising actual mutations. Two legs: (1) a dismissed-but-live card settled via `settle` — `reconcileApply` re-adopts the live card: status set to `promoted`, refs written from the board scan; (2) a dead-source candidate (source file `GONE.md` absent on disk) dismissed. Both heals are self-extinguishing: second scan clean. `settle`'s exact semantics: sets status → `'promoted'` and writes `promotion` refs (issueNumber, issueUrl, itemId) from the reconcile scan's board read — not from any cached state. `dismiss` sets status → `'dismissed'`; the candidate record is retained.
 
 **`tests/sim-soak.test.mjs`** — seeded LCG PRNG (no deps; the seed is the test's name). 4 fixed seeds × ~120 steps; weighted op draw (heavy: humanMove/summary/newSession; light: crashedPromote/archive/retitle/undoTo). `checkInvariants()` after every step. On violation: throw includes seed, step index, and the full op trace (replayable verbatim). Runtime budget: a few seconds total.
 
@@ -100,14 +102,14 @@ Every multi-write sequence and every gap; one recovery scenario per row. (Sequen
 
 ## 7. Live E2E & runbook
 
-**`tests/live-e2e.test.mjs`** (skip unless `GBS_LIVE=1`; becomes the 4th gated skip): bootstrap a throwaway board from a sandbox repo → seed one TODO line → real sync/map/promote of one card → live `move` → `reconcile scan` (expect clean) → `snapshot take` + live mutation + `snapshot diff`/`invert` (read-only assertions) → teardown (close issues, delete project) in a `finally` block; if teardown itself fails, print every leftover resource id.
+**`tests/live-e2e.test.mjs`** (skip unless `GBS_LIVE=1`; becomes the 4th gated skip): bootstrap a throwaway board from a sandbox repo → seed one TODO line → real sync/map/promote of one card → live `move` → `reconcile scan` (expect clean) → `snapshot take` + live mutation + `snapshot diff`/`invert` (read-only assertions) → teardown in a `finally` block; if teardown itself fails, print every leftover resource id. **Teardown deletes the project only** — issues are left open (the runbook documents manual closure and the `gbs-e2e-` title-prefix search for orphans).
 
 **`docs/LIVE-RUNBOOK.md`**: prerequisites (gh auth, scopes, sandbox repo), the exact command, what gets created (names/labels), expected output shape, how to verify teardown, what to do about leftovers, and the standing rule — `GBS_LIVE=1` is operator-only, never set in automated/subagent runs.
 
 ## 8. Error handling
 
 - **The world fails loud and labeled** — invariant throws name the invariant and ids; soak throws add seed + step + trace.
-- **Faults are one-shot and scoped** — `failNext` clears after firing; no fault leaks across scenarios; sabotage paths live under the world's temp dir only.
+- **Faults are one-shot and scoped** — `failNext` clears after firing; `crashedPromote` also clears any unconsumed faults in its `finally` block (leak-proofing); no fault leaks across scenarios; sabotage paths live under the world's temp dir only.
 - **`newSession()` after a crash asserts recoverability** (summary completes; invariants hold) rather than assuming it.
 - **Live E2E**: teardown in `finally`; leftover ids printed on teardown failure so the runbook's cleanup-verification step has a target.
 - **Found bugs**: fixed in separate atomic commits, each with a regression test; the scenario/soak that found it keeps passing afterward.
