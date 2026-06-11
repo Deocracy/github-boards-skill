@@ -31,6 +31,7 @@ import { prepareInput, applyProposals } from './lib/mapper.mjs';
 import { classify, resolveDecisions, cidMarker } from './lib/promote.mjs';
 import { PROFILES } from './lib/profiles.mjs';
 import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction, WATCH_GLOB_RE } from './lib/sources.mjs';
+import { classifyDrift, resolveReconcileDecisions } from './lib/reconcile.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -705,6 +706,31 @@ export async function syncRecord(ctx) {
   let say = `Sync: added ${added.length} candidate(s); ${deduped.length} deduped, ${skippedDone.length} done item(s) skipped.`;
   if (uncovered.length) say += ` ${uncovered.length} changed file(s) not covered by the extraction — still flagged.`;
   return { report, say };
+}
+
+// ===========================================================================
+// M4a RECONCILE — drift detection (scan) + ledger-only healing (apply).
+// The board is NEVER written here; board mutations stay promote's job.
+// ===========================================================================
+
+/**
+ * reconcileScan(ctx) — classify drift between the ledger, the live board, and
+ * the source files. READ-ONLY (one live board read; zero writes). A failing
+ * board read throws loudly — this is a user-invoked verb, and silent
+ * degradation would fake a clean bill of health.
+ * @param {object} ctx { engine, config, dir, sourceExists? }
+ * @returns {Promise<{drift:object, say:string}>}
+ */
+export async function reconcileScan(ctx) {
+  const dir = ctx.dir || process.cwd();
+  const ledger = (await readLedger(dir)) || { candidates: [] };
+  const { items } = await ctx.engine.listItemsWithBodies();
+  const sourceExists = ctx.sourceExists || ((p) => existsSync(join(dir, p)));
+  const drift = classifyDrift({ ledger, items, sourceExists });
+  const say = drift.clean
+    ? 'Reconcile scan: clean — ledger and board agree.'
+    : `Reconcile scan: ${drift.safeHeals.length} safe heal(s), ${drift.uncertain.length} need a decision, ${drift.duplicates.length} duplicate marker group(s).`;
+  return { drift, say };
 }
 
 /**
