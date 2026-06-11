@@ -154,6 +154,11 @@ test('B2: store transiently over keep is pruned by the next successful write; jo
   await w.checkInvariants();
 });
 
+// C1: models a crashed-settlement re-record via content-hash dedup.
+// The "crashed settlement" scenario (extraction recorded, ledger write never
+// reached disk) is behaviourally equivalent to re-running the same extraction
+// in the next session — the content-hash ids are identical so syncRecord
+// deduplicates rather than appending, keeping exactly 2 candidates.
 test('C1: sync re-run with the same extraction dedups — no duplicate candidates', async () => {
   const w = await makeWorld();
   await w.ops.seedTodo(['Alpha', 'Beta']);

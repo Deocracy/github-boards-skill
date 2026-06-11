@@ -77,12 +77,17 @@ for (const seed of SEEDS) {
         await op.run();
         await w.checkInvariants();
       } catch (e) {
+        // The trace is replayable only by re-running the SAME SEED end-to-end:
+        // ops draw randomness from the LCG AFTER the selection roll, so partial
+        // re-runs diverge from step N even when the prefix appears identical.
         throw new Error(
           `SOAK FAILURE seed=0x${seed.toString(16)} step=${step} op=${op.name}\n` +
           `trace: ${trace.join(' -> ')}\n${e.stack || e.message}`,
         );
       }
     }
+    // Post-loop invariants: same seed context as the loop above — a failure here
+    // is also replayable only by re-running the full seed end-to-end.
     await w.checkInvariants();
   });
 }

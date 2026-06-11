@@ -125,7 +125,16 @@ export async function makeWorld({ config } = {}) {
     comment: async () => { maybeFail('comment'); return { ok: true }; },
     listItems: () => { const items = itemsView(false); return { items, count: items.length }; },
     listItemsWithBodies: () => { const items = itemsView(true); return { items, count: items.length }; },
-    getStageField: () => ({ id: 'stage-field', options: Object.entries(cfg.stageOptions).map(([name, id]) => ({ name, id })) }),
+    // getStageField sim stub — shape MUST match the real DI contract:
+    //   { fieldId, fieldName, options: [{label, optionId}] }
+    // (real board.mjs getStageField returns exactly this; diverging here
+    // causes pass-on-mock / break-on-live when verbs read field.fieldId or
+    // option.label / option.optionId downstream).
+    getStageField: () => ({
+      fieldId: 'stage-field',
+      fieldName: 'Stage',
+      options: Object.entries(cfg.stageOptions).map(([label, optionId]) => ({ label, optionId })),
+    }),
   });
 
   /** One-shot fault: the (onCall)th future call of `op` throws. */
@@ -266,7 +275,9 @@ export async function makeWorld({ config } = {}) {
     async promoteAll() { return promoteApply(null, ctx()); },
 
     /** Crash a promote run at a named window (reachable seams only):
-     *  'A1' ledger-write dies right after createIssue (refs never persist)
+     *  'A1' ledger-write dies right after createIssue (refs never persist).
+     *       A1 is designed for single-item promote runs — the sabotage fires on
+     *       the FIRST createIssue, so a batch with >1 pending item would mis-arm.
      *  'A2' addIssueToBoard dies (refs persisted; stage/labels unrun)
      *  'A3' setStage dies (labels unrun)  ·  'A3b' setLabels dies
      *  'A4' second item's createIssue dies (batch split)            */
@@ -278,12 +289,16 @@ export async function makeWorld({ config } = {}) {
       else if (window === 'A3b') engine.failNext('setLabels');
       else if (window === 'A4') engine.failNext('createIssue', { onCall: 2 });
       else throw new Error(`unknown crash window ${window}`);
-      const rep = await promoteApply(null, ctx());
-      if (window === 'A1') faults.repairLedger();
-      // Clear any armed fault that was NOT consumed by this promote run (e.g. an A3
-      // partial whose resume path skips addIssueToBoard, leaving an A2-armed fault
-      // unconsumed). Without this the leaked fault would kill the next innocent op (F3).
-      faults.clearFaults();
+      let rep;
+      try {
+        rep = await promoteApply(null, ctx());
+      } finally {
+        if (window === 'A1') faults.repairLedger();
+        // Clear any armed fault that was NOT consumed by this promote run (e.g. an A3
+        // partial whose resume path skips addIssueToBoard, leaving an A2-armed fault
+        // unconsumed). Without this the leaked fault would kill the next innocent op (F3).
+        faults.clearFaults();
+      }
       return rep;
     },
 
@@ -296,6 +311,9 @@ export async function makeWorld({ config } = {}) {
       return route(card, owner, ctx());
     },
 
+    // humanRelabel: GitHub-UI direct label action (no verb for generic labels).
+    // Routes through engine.setLabels → maybeFail('setLabels'), so it CAN consume
+    // an armed setLabels fault — test authors must be aware of this coupling.
     async humanRelabel(card, label) { await engine.setLabels(card, [label]); },
 
     async reconcileScanHeal(decisions = null) {
