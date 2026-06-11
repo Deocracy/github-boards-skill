@@ -2,6 +2,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { decide } from '../hooks/PostToolUse/watch-sources.mjs';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const PROFILES_FIXTURE = [
   { name: 'superpowers', watch: ['docs/superpowers/plans/**/*.md'] },
@@ -92,4 +97,22 @@ test('writeAnnounced throwing -> note still returned (duplicate later beats nois
 test('note reads as a factual statement, not an imperative system command', async () => {
   const r = await decide(input('/work/TODO.md'), deps());
   assert.match(r.additionalContext, /^github-boards: watched source file changed/);
+});
+
+test('hooks.json registers the PostToolUse watch-sources hook with the right matcher', () => {
+  const cfg = JSON.parse(readFileSync(join(repoRoot, 'hooks', 'hooks.json'), 'utf8'));
+  const entries = cfg.hooks.PostToolUse;
+  assert.ok(Array.isArray(entries), 'PostToolUse entries missing');
+  const entry = entries.find((e) => (e.hooks || []).some((h) => (h.args || []).join(' ').includes('watch-sources.mjs')));
+  assert.ok(entry, 'watch-sources.mjs not registered');
+  assert.equal(entry.matcher, 'Write|Edit|MultiEdit|NotebookEdit');
+});
+
+test('DRIFT GUARD: the note suggests verbs that actually exist in the CLI help', async () => {
+  const r = await decide(input('/work/TODO.md'), deps());
+  const help = readFileSync(join(repoRoot, 'scripts', 'board-manager.mjs'), 'utf8');
+  for (const verb of ['sync scan', 'sync record']) {
+    assert.match(r.additionalContext, new RegExp(verb));
+    assert.ok(help.includes(verb), `CLI help no longer documents '${verb}' — the hook note is orphaned`);
+  }
 });
