@@ -292,6 +292,57 @@ test('A3-then-archive: a mid-promote partial whose card is archived is classifie
   await w.checkInvariants();
 });
 
+test('STORY heal-for-real: dismissed-but-live SETTLEd + dead-source DISMISSed — second scan clean (self-extinguishing)', async () => {
+  const w = await seededWorld(['Live one']);
+  await w.ops.promoteAll();
+
+  // --- leg 1: dismissed-but-live ---
+  // User dismisses the candidate in the ledger while its card lives on.
+  // This is a reachable user action (ledger-level dismissal via mapper / direct edit).
+  const { readLedger: rl, writeLedger: wl } = await import('../scripts/lib/ledger.mjs');
+  let ledger = await rl(w.dir);
+  ledger.candidates.find((c) => c.title === 'Live one').status = 'dismissed';
+  await wl(w.dir, ledger);
+
+  // --- leg 2: dead-source ---
+  // Add an unpromoted candidate whose source file ('GONE.md') was never created on disk.
+  // syncRecord records it as status='candidate'; it is never mapped or promoted.
+  // reconcileScan's default sourceExists uses existsSync(join(dir, src)) — GONE.md is absent.
+  const { syncRecord } = await import('../scripts/board-manager.mjs');
+  await syncRecord({ dir: w.dir, config: w.config, extracted: [{ title: 'Doomed source', source: 'GONE.md' }] });
+
+  await w.newSession();
+  const { reconcileScan } = await import('../scripts/board-manager.mjs');
+  const scan = await reconcileScan({ engine: w.engine, config: w.config, dir: w.dir });
+
+  const dbl = scan.drift.uncertain.find((u) => u.kind === 'dismissed-but-live');
+  assert.ok(dbl, 'dismissed-but-live classified');
+
+  const ds = scan.drift.uncertain.find((u) => u.kind === 'dead-source');
+  assert.ok(ds, 'dead-source classified');
+
+  // heal both: settle the dismissed-but-live (adopts it back); dismiss the dead-source
+  await w.ops.reconcileScanHeal({
+    [dbl.candidateId]: { action: 'settle' },
+    [ds.candidateId]: { action: 'dismiss' },
+  });
+
+  const scan2 = await reconcileScan({ engine: w.engine, config: w.config, dir: w.dir });
+  assert.ok(scan2.drift.clean, 'both heals are self-extinguishing');
+
+  // settle sets status='promoted' and writes promotion refs from the scan's board refs
+  ledger = await rl(w.dir);
+  const settled = ledger.candidates.find((c) => c.title === 'Live one');
+  assert.equal(settled.status, 'promoted', 'settle re-adopts the live card into the ledger');
+  assert.ok(settled.promotion && settled.promotion.issueNumber, 'settle writes board refs into promotion');
+
+  // dead-source was dismissed (not deleted) — candidate persists with status='dismissed'
+  const dismissed = ledger.candidates.find((c) => c.title === 'Doomed source');
+  assert.equal(dismissed.status, 'dismissed', 'dead-source dismiss sets status=dismissed');
+
+  await w.checkInvariants();
+});
+
 test('STORY messy-repo: dismissed-but-live + vanished cards reconcile with ZERO board writes; self-extinguishing', async () => {
   const w = await seededWorld(['Keep me', 'Dismiss me']);
   await w.ops.promoteAll();

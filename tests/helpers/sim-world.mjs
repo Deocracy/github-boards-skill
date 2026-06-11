@@ -198,15 +198,31 @@ export async function makeWorld({ config } = {}) {
       }
     }
 
-    // 4. snapshot-store: count <= resolveKeep(config)
+    // 4. snapshot-store: count <= resolveKeep(config).
+    // The full dedup-iff (same content → no new snapshot) is exercised by the
+    // B-row scenarios and the long-week idle assertion; here we assert the
+    // simpler monotone bound: the store never exceeds the configured keep cap.
     const snaps = await listSnapshots(dir);
     const keep = resolveKeep(cfg);
     if (snaps.length > keep) {
       throw new Error(`invariant snapshot-store: ${snaps.length} snapshots exceed keep=${keep}`);
     }
 
-    // 5. state-honesty: if state.json exists it must be valid JSON (readState throws on malformed)
-    await readState(dir); // throws 'state.mjs: malformed JSON in ...' if corrupt
+    // 5. state-honesty: if state.json exists it must be valid JSON AND carry the
+    // expected {lane, labels, owner} shape per item so a future consumer doesn't
+    // pass-on-mock / break-on-live.
+    // (readState throws 'state.mjs: malformed JSON in ...' on corrupt JSON)
+    const state = await readState(dir);
+    if (state && state.items) {
+      for (const [k, v] of Object.entries(state.items)) {
+        if (!/^\d+$/.test(k)) {
+          throw new Error(`invariant state-honesty: state.items key ${JSON.stringify(k)} is not an integer issueNumber`);
+        }
+        if (!v || typeof v.lane === 'undefined' || !Array.isArray(v.labels) || typeof v.owner === 'undefined') {
+          throw new Error(`invariant state-honesty: state.items[${k}] missing lane/labels/owner shape (got ${JSON.stringify(v)})`);
+        }
+      }
+    }
   }
 
   /** Session boundary: run REAL summary (state write + snapshot piggyback). */
