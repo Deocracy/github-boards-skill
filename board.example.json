@@ -22,6 +22,9 @@
     "watch": [],
     "disable": []
   },
+  "snapshots": {
+    "keep": 50
+  },
   "rules": {
     "maxLanes": 8,
     "useTags": false,

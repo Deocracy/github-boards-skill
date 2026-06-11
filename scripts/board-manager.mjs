@@ -1214,6 +1214,10 @@ async function cli() {
   sync record --extracted <file>        record the LLM's extracted work items into the ledger
   reconcile scan                        drift report: ledger vs board vs source files (read-only)
   reconcile apply [--decisions <file>]  heal drift — ledger-only writes (board untouched)
+  snapshot take ["label"]               manual board save-point (dedup'd)
+  snapshot list                         stored snapshots, newest first
+  snapshot diff <ref> [<ref2>]          what changed between two points (ref2 omitted = live board)
+  snapshot log [N]                      the permanent event journal (default last 20)
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -1282,6 +1286,24 @@ async function cli() {
       return;
     }
     throw new Error('usage: sync <scan|record> [--extracted <file>]');
+  }
+
+  // snapshot list / log are fs-only (no engine, no board.json required) — bypass loadConfig.
+  if (verb === 'snapshot') {
+    const sub = rest[0];
+    if (sub === 'list' || !sub) {
+      const r = await snapshotList({ dir: process.cwd() });
+      console.log(r.say);
+      console.log(JSON.stringify(r.snapshots, null, 2));
+      return;
+    }
+    if (sub === 'log') {
+      const r = await snapshotLog(rest[1] ? Number(rest[1]) : 20, { dir: process.cwd() });
+      console.log(r.say);
+      console.log(JSON.stringify(r.entries, null, 2));
+      return;
+    }
+    // take / diff need the engine — fall through to loadConfig below.
   }
 
   // The verb-layer config (preset + routing) comes from scripts/lib/config.mjs.
@@ -1407,6 +1429,33 @@ async function cli() {
         return;
       }
       throw new Error('usage: reconcile <scan|apply> [--decisions <file>]');
+    }
+    case 'snapshot': {
+      const sub = rest[0];
+      if (sub === 'take') {
+        const r = await snapshotTake(rest[1] || null, { ...ctx, dir: process.cwd() });
+        console.log(r.say);
+        return;
+      }
+      if (sub === 'list' || !sub) {
+        const r = await snapshotList({ dir: process.cwd() });
+        console.log(r.say);
+        console.log(JSON.stringify(r.snapshots, null, 2));
+        return;
+      }
+      if (sub === 'diff') {
+        const r = await snapshotDiff(rest[1] || 'latest', rest[2] || null, { ...ctx, dir: process.cwd() });
+        console.log(r.say);
+        console.log(JSON.stringify(r.diff, null, 2));
+        return;
+      }
+      if (sub === 'log') {
+        const r = await snapshotLog(rest[1] ? Number(rest[1]) : 20, { dir: process.cwd() });
+        console.log(r.say);
+        console.log(JSON.stringify(r.entries, null, 2));
+        return;
+      }
+      throw new Error('usage: snapshot <take ["label"] | list | diff <ref> [<ref2>] | log [N]>');
     }
     default:
       throw new Error(`unknown verb '${verb}'. Run --help for the verb map.`);
