@@ -115,6 +115,8 @@ gh project delete <NUMBER> --owner <ORG_OR_USER>
 gh issue close <NUMBER> --repo <OWNER/REPO>
 ```
 
+Leftover boards from failed runs are searchable by the `gbs-e2e-` title prefix.
+
 ---
 
 ## Troubleshooting

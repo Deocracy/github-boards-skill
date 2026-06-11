@@ -90,7 +90,7 @@ test(
       const syncResult = await syncRecord({
         dir, config: verbCfg, extracted: [{ title: 'E2E smoke card', source: 'TODO.md' }],
       });
-      assert.equal(syncResult.added.length, 1, 'syncRecord must add the new candidate');
+      assert.equal(syncResult.report.added.length, 1, 'syncRecord must add the new candidate');
 
       const ledger = await readLedger(dir);
       const candidate = ledger.candidates[0];
@@ -123,10 +123,7 @@ test(
 
       // ── 5. Reconcile — must be clean after a normal move ────────────────────
       const scan = await reconcileScan({ engine, config: verbCfg, dir });
-      assert.ok(
-        scan.drift.clean || scan.drift.resumePending.length === 0,
-        `reconcile must be clean after normal move: ${scan.say}`,
-      );
+      assert.ok(scan.drift.clean, `reconcile must be clean: ${scan.say}`);
 
       // ── 6. Snapshot diff + invert (read-only assertions) ────────────────────
       const d = await snapshotDiff('latest', null, { engine, config: verbCfg, staged: false, dir });
