@@ -1079,28 +1079,21 @@ export async function summary(ctx) {
     say = `Since last time: ${d.moved.length} moved, ${d.added.length} new, ${rejected.length} rejected. ${sayQueues(human, agent)}`;
   }
 
-  // 7–9. Persist state, teamSync, and M4b versioned snapshot.
-  // All three write under .github-boards/; wrap together so a filesystem
-  // failure (e.g. the dir is not writable) is non-fatal — history must never
-  // break summary, and the session-start hook calls summary.
+  // 7. Persist state (always — not a board write)
+  const snapshot = { seenAt: new Date().toISOString(), items: currentMap };
+  await writeState(dir, snapshot);
+
+  // 8. teamSync opt-in: also write committed last-sync.json
+  if (config.teamSync === true) {
+    const syncPath = join(dir, 'last-sync.json');
+    await writeFile(syncPath, JSON.stringify(snapshot, null, 2), 'utf8');
+  }
+
+  // 9. M4b: versioned snapshot + event log (non-fatal — history must never
+  // break summary, and the session-start hook calls summary).
   let snapNote = '';
   try {
-    // 7. Persist state (always — not a board write)
-    const snapshot = { seenAt: new Date().toISOString(), items: currentMap };
-    await writeState(dir, snapshot);
-
-    // 8. teamSync opt-in: also write committed last-sync.json
-    if (config.teamSync === true) {
-      const syncPath = join(dir, 'last-sync.json');
-      await writeFile(syncPath, JSON.stringify(snapshot, null, 2), 'utf8');
-    }
-
-    // 9. M4b: versioned snapshot + event log
-    try {
-      await writeSnapshot(dir, items || [], { keep: resolveKeep(config) });
-    } catch (e) {
-      snapNote = ` (snapshot skipped: ${e.message})`;
-    }
+    await writeSnapshot(dir, items || [], { keep: resolveKeep(config) });
   } catch (e) {
     snapNote = ` (snapshot skipped: ${e.message})`;
   }

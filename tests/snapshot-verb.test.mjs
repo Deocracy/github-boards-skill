@@ -1,7 +1,7 @@
 // tests/snapshot-verb.test.mjs — M4b verbs + summary piggyback (mock engine)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import { summary, snapshotTake, snapshotList, snapshotDiff, snapshotLog } from '../scripts/board-manager.mjs';
@@ -34,11 +34,14 @@ test('summary piggyback: a changed board writes exactly one snapshot; an unchang
 
 test('summary piggyback: a snapshot-store failure does NOT fail summary — say gains a suffix', async () => {
   const dir = tmp();
-  // sabotage: a FILE where the snapshots DIR must go -> mkdir fails
-  writeFileSync(join(dir, '.github-boards'), 'not a dir', 'utf8');
+  // sabotage: a FILE where the snapshots DIR must go -> writeSnapshot's mkdir
+  // fails, but .github-boards itself works (writeState is unaffected)
+  mkdirSync(join(dir, '.github-boards'), { recursive: true });
+  writeFileSync(join(dir, '.github-boards', 'snapshots'), 'not a dir', 'utf8');
   const engine = engineWith([boardItem(1)]);
   const r = await summary({ engine, config: CFG, staged: false, dir });
   assert.match(r.say, /snapshot skipped/i);
+  assert.ok(existsSync(join(dir, '.github-boards', 'state.json')), 'writeState must still succeed');
 });
 
 test('snapshotTake: stores the label; dedup reports unchanged', async () => {
