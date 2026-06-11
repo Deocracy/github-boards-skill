@@ -25,6 +25,7 @@ M3b made the skill notice changed source files **at session start**; M3c closes 
 ### Out of scope (later modules / accepted)
 - The conversational drain-the-note behavior (Claude auto-running sync on the note) → **M5** (SKILL.md triggering). M3c ships the signal; M5 ships the reflex.
 - Bash-mediated writes (`echo > TODO.md`) don't fire PostToolUse Write/Edit matchers — **accepted**: caught by the session-start scan (M3b). Parsing Bash commands for file writes is fragile and out of scope.
+- Windows case-mismatch (`todo.md` written while the pattern says `TODO.md`) produces no mid-session note — `matchesWatch` is case-sensitive string comparison — **accepted, same backstop**: the M3b scan reads real dirents (canonical casing) and re-flags at the next session start. Every M3c miss is advisory-only; the hash-diff stays the durable record.
 - A durable pending queue in the ledger — **rejected** (§1): redundant with the hash-diff and a source of state disagreement.
 - No-op-write suppression via hashing in the hook — **rejected**: puts file reads + sha256 in the per-tool-call hot path and duplicates scan logic; a rare spurious note is harmless.
 
@@ -88,13 +89,13 @@ Silence = print nothing, exit 0. The hook NEVER emits `decision`/`reason` (it ne
 
 - **Never-throw contract** (same as the SessionStart hook): `decide()` catches everything to `null`; `main()` has a belt-and-suspenders catch; always exit 0; print nothing unless there is a note.
 - Every fs touch (board.json read, detect-dir existsSync, announced.json read/write) is individually guarded; any failure degrades to "not watched" or "not yet announced" — the failure mode is a missed or duplicate note, never noise or a broken tool call.
-- The hook adds work to EVERY Write/Edit/MultiEdit/NotebookEdit call, so the fast path is ordered cheapest-first: path extraction + relativize (string ops) → detect dirs (two existsSync) → pattern match (string ops). `announced.json` I/O happens only after a positive match.
+- The hook adds work to EVERY Write/Edit/MultiEdit/NotebookEdit call, so the fast path is ordered cheapest-first: path extraction + relativize (string ops, no I/O — the no-path and outside-repo cases exit here) → profile activation (lazy-import of the verb layer + two existsSync + one best-effort `board.json` read — paid on every in-repo write) → pattern match (string ops). `announced.json` I/O happens only after a positive match.
 
 ## 7. Testing
 
 All deterministic, no live gate.
 
-1. **`matchesWatch` unit (tests/sources.test.mjs):** literal hit/miss; glob hit incl. nested subpath; wrong-ext miss; prefix-collision miss (`docs/superpowers/plans-old/x.md` must NOT match `docs/superpowers/plans/**/*.md`); unsupported forms (`docs/*.md`, `?`) and non-strings never match; empty/null patterns → false.
+1. **`matchesWatch` unit (tests/sources.test.mjs):** literal hit/miss; glob hit incl. nested subpath; wrong-ext miss; prefix-collision miss (`docs/superpowers/plans-old/x.md` must NOT match `docs/superpowers/plans/**/*.md`); `*`-containing non-glob-shape forms (`docs/*.md`) and non-strings never match (`*`-less glob-ish forms like `?`/`{}` take the literal branch — exact equality, matching nothing real, same as expandWatch); leading `./` normalized; empty/null patterns → false.
 2. **Parity test:** shared fixtures asserting `expandWatch` (fs) and `matchesWatch` (pure) agree — every file expandWatch returns for a pattern satisfies matchesWatch, and known-miss cases fail both.
 3. **`decide()` unit (tests/hooks.watch-sources.test.mjs, injected deps):** watched file first time → note containing the relPath and the sync hint; same file same session → null; same file NEW sessionId → note again; unwatched path → null; path outside repo → null; missing file_path/tool_input → null; NotebookEdit `notebook_path` honored; every dep throwing (getProfiles, readAnnounced, writeAnnounced) → null or note-without-persist (degrade, never throw); writeAnnounced called with the updated file list.
 4. **hooks.json:** valid JSON; the PostToolUse entry exists with the exact matcher string and command path.
