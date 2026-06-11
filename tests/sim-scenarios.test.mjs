@@ -31,6 +31,12 @@ test('A1: ledger write dies after createIssue — refs never persist; board stil
   assert.equal(rep2.report.promoted.length, 1);
   const { items } = await w.engine.listItems();
   assert.equal(items.length, 1, 'exactly one card despite the orphan issue');
+  ledger = await readLedger(w.dir);
+  assert.equal(ledger.candidates[0].status, 'promoted');
+  assert.ok(ledger.candidates[0].promotion.itemId, 'recovered refs point at the fresh card');
+  assert.equal(ledger.candidates[0].promotion.issueNumber, items[0].issueNumber, 'ledger refs match the board card');
+  assert.equal(items[0].stageLabel, 'Ideas');
+  assert.deepEqual(items[0].labels, ['agent:go']);
   await w.checkInvariants();
 });
 
@@ -80,6 +86,9 @@ test('A3b: setLabels dies — staged but labelless; resume is a safe idempotent 
   await w.ops.crashedPromote('A3b');
   assert.deepEqual((await w.engine.listItems()).items[0].labels, []);
   await w.newSession();
+  const { reconcileScan } = await import('../scripts/board-manager.mjs');
+  const scan = await reconcileScan({ engine: w.engine, config: w.config, dir: w.dir });
+  assert.equal(scan.drift.resumePending.length, 1, 'on-board staged-but-labelless partial is classified resume-pending');
   await w.ops.promoteAll();
   const items = (await w.engine.listItems()).items;
   assert.equal(items.length, 1);
@@ -99,5 +108,6 @@ test('A4: batch splits — item 1 promoted once, item 2 crashes at create; re-ru
   assert.ok(rep2.report.skipped.some((s) => s.reason === 'already promoted'), 'item 1 skipped, not re-filed');
   const { items } = await w.engine.listItems();
   assert.equal(items.length, 2);
+  assert.ok(items.every((i) => i.stageLabel === 'Ideas' && i.labels.includes('agent:go')));
   await w.checkInvariants();
 });
