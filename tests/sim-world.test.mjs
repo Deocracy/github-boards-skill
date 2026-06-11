@@ -65,3 +65,53 @@ test('faults: sabotageLedgerOnce makes the NEXT ledger write fail, then auto-rep
   await writeLedger(w.dir, { candidates: [{ id: 'x', title: 't', status: 'pending' }] });
   assert.equal((await readLedger(w.dir)).candidates.length, 1);
 });
+
+test('ops: full pipeline round — seedTodo -> pipelineSync -> mapAll -> promoteAll lands cards', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['Wire retry', 'Decide hosting']);
+  const rec = await w.ops.pipelineSync();
+  assert.equal(rec.added.length, 2);
+  await w.ops.mapAll();
+  const rep = await w.ops.promoteAll();
+  assert.equal(rep.report.promoted.length, 2);
+  const { items } = await w.engine.listItems();
+  assert.deepEqual(items.map((i) => i.title).sort(), ['Decide hosting', 'Wire retry']);
+  assert.ok(items.every((i) => i.stageLabel === 'Ideas' && i.labels.includes('agent:go')));
+});
+
+test('ops: newSession runs REAL summary (snapshot piggyback included) and returns the say', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['One']);
+  await w.ops.pipelineSync(); await w.ops.mapAll(); await w.ops.promoteAll();
+  const say1 = await w.newSession();
+  assert.match(say1, /First look|Since last time/);
+  const { listSnapshots } = await import('../scripts/lib/snapshots.mjs');
+  assert.equal((await listSnapshots(w.dir)).length, 1); // piggyback wrote the snapshot
+  await w.ops.humanMove(1, 'Building');
+  const say2 = await w.newSession();
+  assert.match(say2, /1 moved/);
+});
+
+test('ops: humanFlip routes through the REAL route verb (escalation comment on ->human)', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['One']);
+  await w.ops.pipelineSync(); await w.ops.mapAll(); await w.ops.promoteAll();
+  await w.ops.humanFlip(1); // agent -> human
+  const { items } = await w.engine.listItems();
+  assert.deepEqual(items[0].labels.sort(), ['needs-claude']);
+  assert.ok(w.engine.calls.some((c) => c.op === 'comment'), 'route->human escalates via comment');
+});
+
+test('ops: undoTo executes the inverse plan via real move/route and is sound (re-invert empty)', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['One']);
+  await w.ops.pipelineSync(); await w.ops.mapAll(); await w.ops.promoteAll();
+  await w.ops.snapshotTake('baseline');
+  await w.ops.humanMove(1, 'Building');
+  await w.ops.humanFlip(1);
+  const r = await w.ops.undoTo('~1');
+  assert.equal(r.executed, 2);
+  const { items } = await w.engine.listItems();
+  assert.equal(items[0].stageLabel, 'Ideas');
+  assert.deepEqual(items[0].labels.sort(), ['agent:go']);
+});

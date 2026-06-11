@@ -5,10 +5,16 @@
 // (failNext — how network death presents to the verb layer) and ledger-path
 // sabotage (how fs death presents to writeLedger). Persisted state is NEVER
 // hand-mutated (MEMORY: reachable states only).
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, renameSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import { makeMockEngine } from './mock-engine.mjs';
+import {
+  summary, move, route, syncRecord, promoteApply, reconcileScan, reconcileApply,
+  snapshotTake as snapshotTakeVerb, snapshotInvert,
+} from '../../scripts/board-manager.mjs';
+import { readLedger, writeLedger } from '../../scripts/lib/ledger.mjs';
+import { applyProposals } from '../../scripts/lib/mapper.mjs';
 
 export const WORLD_CFG = {
   stageOptions: { Ideas: 'o1', Building: 'o2', Review: 'o3' },
@@ -125,12 +131,110 @@ export async function makeWorld({ config } = {}) {
     retitle: (num, title) => { const i = issues.find((x) => x.number === num); if (i) i.title = title; },
   };
 
+  const ctx = () => ({ engine, config: cfg, staged: false, dir });
+
+  /** Session boundary: run REAL summary (state write + snapshot piggyback). */
+  async function newSession() {
+    const r = await summary(ctx());
+    return r.say;
+  }
+
+  const ops = {
+    _pendingTitles: [],
+
+    /** Append TODO lines (the watched source the pipeline ingests). */
+    async seedTodo(titles) {
+      appendFileSync(join(dir, 'TODO.md'), titles.map((t) => `- [ ] ${t}\n`).join(''), 'utf8');
+      ops._pendingTitles.push(...titles);
+    },
+
+    /** Record the "LLM extraction" of every seeded-but-unrecorded title.
+     *  Returns the report sub-object directly so callers can check .added/.deduped. */
+    async pipelineSync() {
+      const extracted = ops._pendingTitles.map((t) => ({ title: t, source: 'TODO.md' }));
+      ops._pendingTitles = [];
+      const result = await syncRecord({ dir, config: cfg, extracted });
+      return result.report;
+    },
+
+    /** Map every pending candidate (status==='candidate') to a confident agent/Ideas card. */
+    async mapAll() {
+      const ledger = (await readLedger(dir)) || { candidates: [] };
+      const pending = (ledger.candidates || []).filter((c) => c.status === 'candidate');
+      if (!pending.length) return { mapped: 0 };
+      const proposals = pending.map((c) => ({
+        candidateId: c.id, kind: 'card', title: c.title, lane: 'Ideas', owner: 'agent',
+        confidence: 0.95, rationale: 'sim',
+      }));
+      const { ledger: mapped } = applyProposals(ledger, proposals, cfg);
+      await writeLedger(dir, mapped);
+      return { mapped: proposals.length };
+    },
+
+    async promoteAll() { return promoteApply(null, ctx()); },
+
+    /** Crash a promote run at a named window (reachable seams only):
+     *  'A1' ledger-write dies right after createIssue (refs never persist)
+     *  'A2' addIssueToBoard dies (refs persisted; stage/labels unrun)
+     *  'A3' setStage dies (labels unrun)  ·  'A3b' setLabels dies
+     *  'A4' second item's createIssue dies (batch split)            */
+    async crashedPromote(window) {
+      if (window === 'A1') {
+        _armA1 = true; // createIssue override fires sabotageLedgerOnce after push
+      } else if (window === 'A2') engine.failNext('addIssueToBoard');
+      else if (window === 'A3') engine.failNext('setStage');
+      else if (window === 'A3b') engine.failNext('setLabels');
+      else if (window === 'A4') engine.failNext('createIssue', { onCall: 2 });
+      else throw new Error(`unknown crash window ${window}`);
+      const rep = await promoteApply(null, ctx());
+      if (window === 'A1') faults.repairLedger();
+      return rep;
+    },
+
+    async humanMove(card, lane) { return move(card, lane, ctx()); },
+
+    async humanFlip(card) {
+      const { items } = await engine.listItems();
+      const it = items.find((i) => i.issueNumber === card);
+      const owner = (it?.labels || []).includes(cfg.routing.agent) ? 'human' : 'agent';
+      return route(card, owner, ctx());
+    },
+
+    async humanRelabel(card, label) { await engine.setLabels(card, [label]); },
+
+    async reconcileScanHeal(decisions = null) {
+      const scan = await reconcileScan(ctx());
+      if (scan.drift.clean) return { scan, applied: null };
+      const applied = await reconcileApply(decisions, { engine, config: cfg, dir });
+      return { scan, applied };
+    },
+
+    async snapshotTake(label = null) { return snapshotTakeVerb(label, ctx()); },
+
+    /** Undo to a pinned ref: invert, execute every op, then prove soundness
+     *  (re-invert same ref must yield no remaining ops). */
+    async undoTo(ref) {
+      const plan = await snapshotInvert(ref, null, ctx());
+      for (const op of plan.ops) {
+        if (op.op === 'move') await move(op.issueNumber, op.to, ctx());
+        if (op.op === 'route') await route(op.issueNumber, op.to, ctx());
+      }
+      const recheck = await snapshotInvert(ref, null, ctx());
+      if (recheck.ops.length !== 0) {
+        throw new Error(`invariant undo-soundness: ${recheck.ops.length} op(s) remain after undoTo(${ref})`);
+      }
+      return { plan, executed: plan.ops.length };
+    },
+  };
+
   return {
     dir,
     config: cfg,
     engine,
     board,
     faults,
+    ops,
+    newSession,
     _internal: { issues, stages, labels, onBoard, archived },
     // _armA1 accessor for crashedPromote (Tasks 2+)
     get _armA1() { return _armA1; },
