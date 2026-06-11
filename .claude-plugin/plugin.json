@@ -1,7 +1,7 @@
 {
   "name": "github-boards",
-  "version": "0.1.0",
-  "description": "Read and edit a GitHub Projects v2 Kanban board in natural language. Put tasks on the board, see what you need to do vs. what the AI is working on, move cards, route agent/human work, and get a report of what changed — every write previewed first.",
+  "version": "0.2.0",
+  "description": "Read and edit a GitHub Projects v2 Kanban board in natural language. Put tasks on the board, promote the backlog, sync TODOs from any skill, reconcile drift, browse board history, and undo recent changes — every write previewed first.",
   "author": "Deocracy Institute",
   "homepage": "https://github.com/deocracy/github-boards-skill",
   "license": "MIT",

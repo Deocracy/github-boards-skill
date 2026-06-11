@@ -8,8 +8,8 @@
     {
       "name": "github-boards",
       "source": "./",
-      "description": "Conversational GitHub Projects v2 Kanban board skill — natural-language board driving with agent/human routing, staged previews, and report-back.",
-      "version": "0.1.0"
+      "description": "Conversational GitHub Projects v2 Kanban board skill — natural-language board driving with agent/human routing, staged previews, pipeline promotion, source sync, drift reconcile, time-travel snapshots, and undo.",
+      "version": "0.2.0"
     }
   ]
 }

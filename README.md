@@ -4,7 +4,7 @@
 
 **A standalone, self-contained, MIT-licensed [Claude Code](https://code.claude.com) skill.** It reads and edits a GitHub Projects v2 board, routes work as 🤖 agent-actionable vs 🧍 human-actionable, previews every change before writing, and reports back. It is **composable**: any other skill (deep-research, grant work, your own) can call it to drop tasks onto the board.
 
-> **Status: v0.1 built, pre-publish.** The full skill is implemented and tested (115 tests). Final live-board integration and the first publish are the remaining steps — see [ROADMAP](ROADMAP.md).
+> **Status: all six milestones shipped (M1–M6).** 423 tests — 419 passing, 4 operator-gated live skips. One operator live-E2E run remains before 1.0 — see [docs/LIVE-RUNBOOK.md](docs/LIVE-RUNBOOK.md) and the [ROADMAP](ROADMAP.md).
 
 ---
 
@@ -19,8 +19,31 @@
 | "This one needs me" / "Hand it to Claude" | Re-routes the card's owner and keeps it claimed |
 | "Reject this, but keep the learnings" | Moves it to the *Rejected (learnings kept)* lane with a note |
 | "What changed since last time?" | Diffs the board against the last time you looked |
+| "Promote the backlog" | Maps the intent ledger into card proposals, then promotes confident ones to the board (idempotent) |
+| "Sync my TODOs / record this skill's tasks" | Scans watched source files for unfinished work items, extracts them, and feeds them into the ledger for the next promote pass |
+| "Is the board out of sync? / heal the ledger" | Drift report across source files, ledger, and board — then targeted ledger-only healing (board untouched) |
+| "What did the board look like before the cleanup?" | Board history via snapshots + the permanent event log |
+| "Undo what happened since this morning" | Computes and shows the inverse operation plan; executes on your approval |
 
 **Every change is previewed and needs your OK before it's written.** Nothing happens to your board silently.
+
+## The pipeline
+
+```
+sources (TODO.md, plans, other skills' artifacts)
+  └─ sync scan / sync record ─► intent LEDGER ─► map ─► promote plan / promote apply ─► BOARD
+                                                         maintenance loops:
+                                                         reconcile scan/apply  (drift → ledger-only healing)
+                                                         snapshot + event log  (board memory, undo anchor points)
+```
+
+Direct verbs (`put`, `move`, `route`, …) act on the board immediately. The pipeline verbs batch work through the ledger so nothing is filed twice and every promotion is resumable mid-batch.
+
+**Hooks** keep you informed without being asked: on session start, a board digest (what changed since your last look) is injected automatically. When a watched source file changes during a session, a one-line note appears once per file as the cue to run `sync scan`.
+
+## Verification
+
+Deterministic drift gates inside `npm test` keep the prose honest — if a CLI verb is added or removed, a failing test tells you the docs are stale. The test suite also includes a simulation world (multi-session lifecycle scenarios) and a seeded soak run that checks invariants after random op sequences. The live suite (`GBS_LIVE=1`) is operator-gated — one full pass before 1.0; see [docs/LIVE-RUNBOOK.md](docs/LIVE-RUNBOOK.md).
 
 ## Why this exists
 
