@@ -267,6 +267,31 @@ test('STORY long-week: 5 sessions of pipeline + human edits — summaries and th
   await w.checkInvariants();
 });
 
+// F2 regression: archived card mid-promote (A3 partial) must be classified vanished,
+// never silent — and is healable via dismiss (self-extinguishing second scan).
+test('A3-then-archive: a mid-promote partial whose card is archived is classified vanished, not silent — and healable', async () => {
+  const w = await seededWorld();
+  await w.ops.crashedPromote('A3'); // card on board, laneless; status mapped + full refs (itemId set)
+  w.board.archiveCard(1);           // GitHub-UI archive — the card is gone from listItems
+
+  await w.newSession();
+  const { reconcileScan } = await import('../scripts/board-manager.mjs');
+  const scan = await reconcileScan({ engine: w.engine, config: w.config, dir: w.dir });
+  assert.ok(!scan.drift.clean, 'must NOT be silent');
+  const vanished = scan.drift.uncertain.filter((u) => u.kind === 'vanished');
+  assert.equal(vanished.length, 1, 'exactly one vanished entry');
+  const entry = vanished[0];
+  await w.checkInvariants(); // invariant 2 now passes: classified (vanished in uncertain)
+
+  // heal: dismiss it — second scan clean, promote has nothing to resume
+  await w.ops.reconcileScanHeal({ [entry.candidateId]: { action: 'dismiss' } });
+  const scan2 = await reconcileScan({ engine: w.engine, config: w.config, dir: w.dir });
+  assert.ok(scan2.drift.clean, 'self-extinguishing after dismiss');
+  const rep = await w.ops.promoteAll();
+  assert.equal(rep.report.promoted.length, 0, 'nothing re-promotes onto an archived card');
+  await w.checkInvariants();
+});
+
 test('STORY messy-repo: dismissed-but-live + vanished cards reconcile with ZERO board writes; self-extinguishing', async () => {
   const w = await seededWorld(['Keep me', 'Dismiss me']);
   await w.ops.promoteAll();

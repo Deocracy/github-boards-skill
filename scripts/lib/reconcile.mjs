@@ -111,12 +111,20 @@ export function classifyDrift({ ledger, items, sourceExists }) {
     ...uncertain.map((u) => u.candidateId),
   ]);
 
-  // VANISHED: promoted card-kind candidate with no live presence by marker OR number.
+  // VANISHED: a candidate whose card reached the board (itemId persisted) but is
+  // no longer present by marker OR issueNumber. Covers both 'promoted' (existing)
+  // and mid-promote partials ('mapped', 'needs-decision', etc.) whose card was
+  // later archived/deleted via the GitHub UI (F2 fix — previously only gated on
+  // status === 'promoted', silently skipping mid-promote cases).
   for (const c of candidates) {
-    if (c.status !== 'promoted') continue;
-    const num = c.promotion && c.promotion.issueNumber;
+    if (c.status === 'dismissed') continue;
+    // Only card-kind promotions that reached the board carry itemId.
+    if (!c.promotion || c.promotion.itemId == null) continue;
+    const num = c.promotion.issueNumber;
     if (num == null) continue; // comment promotions have no issue of their own
     if (byCid.has(c.id) || liveIssueNumbers.has(num)) continue;
+    // Already classified by the marker loop above — skip to avoid double-bucket.
+    if (markerClassified.has(c.id)) continue;
     uncertain.push({
       kind: 'vanished', candidateId: c.id, title: c.title,
       refs: { ...c.promotion },

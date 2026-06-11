@@ -301,3 +301,27 @@ test('resolveReconcileDecisions: decided dismissed-but-live settle joins toApply
   assert.equal(errors.length, 0);
   assert.deepEqual(toApply.map((a) => [a.candidateId, a.action]), [[CID_A, 'settle']]);
 });
+
+// F2 regression: vanished-mid-promote — a 'mapped' candidate with full refs (itemId set)
+// whose card is gone from the board must be classified vanished (uncertain), never silent.
+test('VANISHED (mid-promote): mapped candidate with itemId and no live card -> uncertain vanished, not silent', () => {
+  const d = classifyDrift({
+    ledger: {
+      candidates: [cand(CID_A, {
+        status: 'mapped',
+        promotion: { issueNumber: 42, itemId: 'item-42', issueUrl: 'https://github.com/o/r/issues/42', issueNodeId: 'node42' },
+      })],
+    },
+    items: [], // card is gone (archived/deleted)
+    sourceExists: exists,
+  });
+  assert.equal(d.safeHeals.length, 0, 'must NOT be a safe heal');
+  assert.equal(d.resumePending.length, 0, 'must NOT be resume-pending (card is gone)');
+  assert.equal(d.uncertain.length, 1);
+  const u = d.uncertain[0];
+  assert.equal(u.kind, 'vanished');
+  assert.equal(u.candidateId, CID_A);
+  assert.deepEqual(u.options, ['re-promote', 'dismiss', 'keep']);
+  assert.match(u.question, /42/);
+  assert.equal(d.clean, false, 'must NOT be clean');
+});
