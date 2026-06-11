@@ -35,7 +35,8 @@ const ANNOUNCED_FILE = 'announced.json';
 /**
  * Default dependency: active profiles for this cwd (presence detection + raw
  * board.json sources block) — identical activation to M3b's scan paths.
- * Lazy-imports the verb layer so the no-match fast path stays cheap.
+ * Lazy-imports the verb layer — parse cost is paid only on in-repo writes;
+ * the no-path / outside-repo fast paths never load it.
  * May throw freely; decide() swallows.
  * @param {string} cwd
  * @returns {Promise<object[]>}
@@ -97,7 +98,7 @@ export async function decide(input, deps = {}) {
     if (!abs) return null;
 
     const rel = relative(cwd, abs).replace(/\\/g, '/');
-    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null; // outside the repo
+    if (!rel || rel === '..' || rel.startsWith('../') || isAbsolute(rel)) return null; // outside the repo
 
     const profiles = await getProfiles(cwd);
     const patterns = (profiles || []).flatMap((p) => (p && Array.isArray(p.watch) ? p.watch : []));

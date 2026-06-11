@@ -134,15 +134,18 @@ export const WATCH_GLOB_RE = /^(.+)\/\*\*\/\*(\.[A-Za-z0-9]+)$/;
  */
 export function matchesWatch(relPath, patterns) {
   if (typeof relPath !== 'string' || relPath === '') return false;
-  for (const pattern of patterns || []) {
-    if (typeof pattern !== 'string') continue;
+  for (const raw of patterns || []) {
+    if (typeof raw !== 'string') continue;
+    const pattern = raw.startsWith('./') ? raw.slice(2) : raw; // expandWatch's join() normalizes "./" — keep parity
     const m = WATCH_GLOB_RE.exec(pattern);
     if (m) {
       if (relPath.startsWith(`${m[1]}/`) && relPath.endsWith(m[2])) return true;
     } else if (!pattern.includes('*')) {
       if (relPath === pattern) return true;
     }
-    // other glob forms: unsupported -> never match
+    // "*"-containing non-glob-shape patterns: ignored. "*"-less glob-ish
+    // patterns ("?", "{}") take the literal branch — exact-equality, so they
+    // match nothing real (same behavior as expandWatch's literal stat path).
   }
   return false;
 }

@@ -99,6 +99,14 @@ test('note reads as a factual statement, not an imperative system command', asyn
   assert.match(r.additionalContext, /^github-boards: watched source file changed/);
 });
 
+test('repo-root file whose NAME starts with ".." is not misclassified as outside the repo', async () => {
+  const r = await decide({
+    session_id: 's1', cwd: '/work', tool_name: 'Write',
+    tool_input: { file_path: '/work/..weird.md' },
+  }, deps({ getProfiles: async () => [{ name: 'generic', watch: ['..weird.md'] }] }));
+  assert.ok(r && /\.\.weird\.md/.test(r.additionalContext));
+});
+
 test('hooks.json registers the PostToolUse watch-sources hook with the right matcher', () => {
   const cfg = JSON.parse(readFileSync(join(repoRoot, 'hooks', 'hooks.json'), 'utf8'));
   const entries = cfg.hooks.PostToolUse;

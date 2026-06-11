@@ -217,3 +217,8 @@ test('WATCH_GLOB_RE is exported (single shared definition with expandWatch)', ()
   assert.ok(WATCH_GLOB_RE.test('docs/superpowers/plans/**/*.md'));
   assert.equal(WATCH_GLOB_RE.test('docs/*.md'), false);
 });
+
+test('matchesWatch: leading "./" in a user pattern is normalized (parity with expandWatch join)', () => {
+  assert.equal(matchesWatch('docs/x.md', ['./docs/**/*.md']), true);
+  assert.equal(matchesWatch('TODO.md', ['./TODO.md']), true);
+});

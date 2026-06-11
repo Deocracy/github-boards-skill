@@ -536,7 +536,9 @@ async function walkFiles(base) {
 /**
  * Expand watch patterns to repo-relative POSIX paths (deduped, sorted).
  * Only `<base>/**\/*.<ext>` and bare literal paths are supported; other glob
- * forms ("*", "?", "{...}", single-star) are silently ignored (never throw).
+ * forms are handled two ways: patterns containing "*" that don't fit the glob
+ * shape are ignored; "*"-less glob-ish patterns ("?", "{...}") fall through to
+ * the literal branch and simply match no real file (never throw).
  * @param {string} dir       repo root
  * @param {string[]} patterns
  * @returns {Promise<string[]>}
