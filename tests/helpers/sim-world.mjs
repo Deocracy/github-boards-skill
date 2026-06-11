@@ -15,6 +15,9 @@ import {
 } from '../../scripts/board-manager.mjs';
 import { readLedger, writeLedger } from '../../scripts/lib/ledger.mjs';
 import { applyProposals } from '../../scripts/lib/mapper.mjs';
+import { classifyDrift } from '../../scripts/lib/reconcile.mjs';
+import { listSnapshots, readLog, resolveKeep } from '../../scripts/lib/snapshots.mjs';
+import { readState } from '../../scripts/lib/state.mjs';
 
 export const WORLD_CFG = {
   stageOptions: { Ideas: 'o1', Building: 'o2', Review: 'o3' },
@@ -133,6 +136,68 @@ export async function makeWorld({ config } = {}) {
 
   const ctx = () => ({ engine, config: cfg, staged: false, dir });
 
+  // ---- invariant closure state
+  let lastLogLines = 0;
+
+  /** Throws naming the violated invariant + offending ids. Cheap enough to run
+   *  after every soak step. Crashed states are LEGAL states — the invariants
+   *  assert classifiability and integrity, not absence of drift. */
+  async function checkInvariants() {
+    const ledger = (await readLedger(dir)) || { candidates: [] };
+    const { items } = await engine.listItemsWithBodies();
+    const drift = classifyDrift({ ledger, items, sourceExists: () => true });
+
+    // 1. no-duplicate-cards: one board card per cid marker
+    if (drift.duplicates.length) {
+      throw new Error(`invariant no-duplicate-cards: duplicate marker group(s): ${JSON.stringify(drift.duplicates)}`);
+    }
+
+    // 2. ledger<->board: refs-bearing non-final candidates must be classified resume-pending
+    const resumeIds = new Set(drift.resumePending.map((r) => r.candidateId ?? r.id));
+    for (const c of ledger.candidates || []) {
+      if (c.promotion && c.promotion.issueNumber != null && c.status !== 'promoted' && c.status !== 'dismissed') {
+        if (!resumeIds.has(c.id)) {
+          throw new Error(`invariant ledger-board: candidate ${c.id} has live refs but is not classified resume-pending`);
+        }
+      }
+      if (c.status === 'promoted' && c.promotion && c.promotion.itemId != null) {
+        const onBoardNow = items.some((it) => it.itemId === c.promotion.itemId);
+        // vanished cards are LEGAL (reconcile's job) — only assert classifiability:
+        if (!onBoardNow && drift.clean) {
+          throw new Error(`invariant ledger-board: promoted ${c.id} vanished but scan says clean`);
+        }
+      }
+    }
+
+    // 3. journal-integrity: append-only, parseable
+    const logPath = join(dir, '.github-boards', 'snapshots', 'log.jsonl');
+    const lines = existsSync(logPath)
+      ? readFileSync(logPath, 'utf8').split('\n').filter((l) => l.trim()).length
+      : 0;
+    if (lines < lastLogLines) {
+      throw new Error(`invariant journal-integrity: log shrank from ${lastLogLines} to ${lines} lines`);
+    }
+    lastLogLines = lines;
+
+    // Also verify skippedLines === 0 (no truncated/unparseable lines at the tail)
+    if (existsSync(logPath)) {
+      const { skippedLines } = await readLog(dir, Infinity);
+      if (skippedLines > 0) {
+        throw new Error(`invariant journal-integrity: ${skippedLines} unparseable line(s) in log`);
+      }
+    }
+
+    // 4. snapshot-store: count <= resolveKeep(config)
+    const snaps = await listSnapshots(dir);
+    const keep = resolveKeep(cfg);
+    if (snaps.length > keep) {
+      throw new Error(`invariant snapshot-store: ${snaps.length} snapshots exceed keep=${keep}`);
+    }
+
+    // 5. state-honesty: if state.json exists it must be valid JSON (readState throws on malformed)
+    await readState(dir); // throws 'state.mjs: malformed JSON in ...' if corrupt
+  }
+
   /** Session boundary: run REAL summary (state write + snapshot piggyback). */
   async function newSession() {
     const r = await summary(ctx());
@@ -235,6 +300,7 @@ export async function makeWorld({ config } = {}) {
     faults,
     ops,
     newSession,
+    checkInvariants,
     _internal: { issues, stages, labels, onBoard, archived },
     // _armA1 accessor for crashedPromote (Tasks 2+)
     get _armA1() { return _armA1; },

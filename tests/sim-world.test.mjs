@@ -115,3 +115,38 @@ test('ops: undoTo executes the inverse plan via real move/route and is sound (re
   assert.equal(items[0].stageLabel, 'Ideas');
   assert.deepEqual(items[0].labels.sort(), ['agent:go']);
 });
+
+test('checkInvariants: clean world passes; deliberate duplicate-cid violation throws (non-vacuous)', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['One']);
+  await w.ops.pipelineSync(); await w.ops.mapAll(); await w.ops.promoteAll();
+  await w.newSession();
+  await w.checkInvariants(); // must not throw
+
+  // Backdoor (test-only): clone card 1 with the SAME cid marker body onto the board.
+  const src = w._internal.issues[0];
+  const dupe = await w.engine.createIssue(src.title + ' (dupe)', src.body);
+  await w.engine.addIssueToBoard(dupe.url, {});
+  await assert.rejects(() => w.checkInvariants(), /no-duplicate-cards/);
+});
+
+test('checkInvariants: journal regression (line count shrinks) throws', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['One']);
+  await w.ops.pipelineSync(); await w.ops.mapAll(); await w.ops.promoteAll();
+  await w.newSession();
+  await w.checkInvariants(); // primes the monotonic counter
+  const { writeFileSync: wf } = await import('node:fs');
+  wf(`${w.dir}/.github-boards/snapshots/log.jsonl`, '', 'utf8'); // truncate (test-only backdoor)
+  await assert.rejects(() => w.checkInvariants(), /journal-integrity/);
+});
+
+test('checkInvariants: resume-pending candidates must be classifiable, not lost', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['One']);
+  await w.ops.pipelineSync(); await w.ops.mapAll();
+  await w.ops.crashedPromote('A3'); // refs persisted, itemId set, setStage failed — resume-pending
+  // A crashed A3 state is LEGAL: the candidate has refs, status is not 'promoted', not 'dismissed'.
+  // checkInvariants must pass (classifiable) — not throw.
+  await w.checkInvariants();
+});
