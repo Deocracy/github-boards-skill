@@ -163,3 +163,29 @@ test('readLog: no log yet -> empty, not an error', async () => {
   const dir = tmp();
   assert.deepEqual(await readLog(dir, 10), { entries: [], skippedLines: 0 });
 });
+
+test('writeSnapshot: unreadable newest snapshot -> write proceeds, log line is initial (dedup impossible)', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [item(1)], {});
+  const snapdir = join(dir, '.github-boards', 'snapshots');
+  const newest = readdirSync(snapdir).filter((f) => f.startsWith('snapshot-')).sort().reverse()[0];
+  writeFileSync(join(snapdir, newest), '{not json', 'utf8');
+  const r = await writeSnapshot(dir, [item(1)], {}); // same board — but dedup can't see through corruption
+  assert.equal(r.skipped, false);
+  const { entries } = await readLog(dir, 10);
+  assert.equal(entries[0].initial, true); // newest log line restarts the baseline
+});
+
+test('listSnapshots: corrupt snapshot file listed as (unreadable), never hidden', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [item(1)], { label: 'good' });
+  await writeSnapshot(dir, [item(2)], { label: 'bad-to-be' });
+  const snapdir = join(dir, '.github-boards', 'snapshots');
+  const newest = readdirSync(snapdir).filter((f) => f.startsWith('snapshot-')).sort().reverse()[0];
+  writeFileSync(join(snapdir, newest), 'truncated', 'utf8');
+  const list = await listSnapshots(dir);
+  assert.equal(list.length, 2);
+  assert.equal(list[0].label, '(unreadable)');
+  assert.equal(list[0].takenAt, null);
+  assert.equal(list[1].label, 'good');
+});

@@ -136,6 +136,7 @@ export async function listSnapshots(dir) {
  * then prune snapshot files beyond `keep`. The log is NEVER pruned.
  * Same-millisecond collisions bump the stamp by 1ms until free; takenAt always
  * equals the bumped stamp's ISO form so file order === takenAt order.
+ * Single-writer assumed (one CLI/hook invocation at a time) — concurrent calls may race the filename check.
  * @param {string} dir
  * @param {object[]} items  listItems-shaped board items
  * @param {{label?:string|null, keep?:number}} [opts]
