@@ -5,7 +5,7 @@
 // (failNext — how network death presents to the verb layer) and ledger-path
 // sabotage (how fs death presents to writeLedger). Persisted state is NEVER
 // hand-mutated (MEMORY: reachable states only).
-import { mkdtempSync, mkdirSync, rmdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import { makeMockEngine } from './mock-engine.mjs';
@@ -45,15 +45,20 @@ export async function makeWorld({ config } = {}) {
   // ---- ledger-path fault helpers (declared here so createIssue override can see faults)
   const ledgerPath = join(dir, '.github-boards', 'ledger.json');
   const ledgerBak = join(dir, '.github-boards', 'ledger.json.bak');
+  let _ledgerSabotaged = false;
   const faults = {
     sabotageLedgerOnce() {
+      if (_ledgerSabotaged) throw new Error('sim-world: ledger already sabotaged — repairLedger() first');
       // a DIRECTORY at the file path -> next writeFile throws (EISDIR/EPERM)
       if (existsSync(ledgerPath)) renameSync(ledgerPath, ledgerBak);
       mkdirSync(ledgerPath, { recursive: true });
+      _ledgerSabotaged = true;
     },
     repairLedger() {
-      rmdirSync(ledgerPath);
+      if (!_ledgerSabotaged) return;
+      rmSync(ledgerPath, { recursive: true, force: true });
       if (existsSync(ledgerBak)) renameSync(ledgerBak, ledgerPath);
+      _ledgerSabotaged = false;
     },
     sabotageSnapshotsDirOnce() {
       mkdirSync(join(dir, '.github-boards'), { recursive: true });
@@ -105,8 +110,9 @@ export async function makeWorld({ config } = {}) {
       return { ok: true };
     },
     comment: async () => { maybeFail('comment'); return { ok: true }; },
-    listItems: () => ({ items: itemsView(false), count: itemsView(false).length }),
-    listItemsWithBodies: () => ({ items: itemsView(true), count: itemsView(true).length }),
+    listItems: () => { const items = itemsView(false); return { items, count: items.length }; },
+    listItemsWithBodies: () => { const items = itemsView(true); return { items, count: items.length }; },
+    getStageField: () => ({ id: 'stage-field', options: Object.entries(cfg.stageOptions).map(([name, id]) => ({ name, id })) }),
   });
 
   /** One-shot fault: the (onCall)th future call of `op` throws. */
