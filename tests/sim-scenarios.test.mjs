@@ -130,6 +130,12 @@ test('B1: snapshot log-append dies — rollback leaves no orphan; retry records 
   const { readLog } = await import('../scripts/lib/snapshots.mjs');
   const { entries } = await readLog(w.dir, 10);
   assert.equal(entries[0].moved.length, 1, 'the event reached the permanent journal');
+  // readLog returns newest-first: entries[0] = retry move, entries[1] = baseline initial.
+  // Exactly 2 lines: snapshotTake('baseline') wrote the initial line; the doomed take
+  // failed and its rollback unlinked the orphaned snapshot file so no entry was appended;
+  // snapshotTake('retry') wrote the move-event line. No other log lines exist.
+  assert.equal(entries.length, 2, 'baseline initial + exactly ONE retry event — the failed attempt left no line');
+  assert.equal(entries[1].initial, true);
   await w.checkInvariants();
 });
 
@@ -194,6 +200,11 @@ test('E1: undo crashes between ops — re-invert vs the SAME pinned anchor propo
   await move(plan.ops[0].issueNumber, plan.ops[0].to, ctx); // execute op 1, then "crash"
   // newSession writes a new snapshot (the board is NOT deduped here — the move ran),
   // aging the 'anchor' snapshot from ~1 to ~2.
+  // newSession writes a new snapshot (the board changed — the partial move ran, so
+  // dedup does NOT skip it), which ages every prior ref by one position. The anchor
+  // is at ~2 only because newSession ALWAYS writes here; if that ever changes
+  // (e.g. dedup fires because the board is unchanged), verify the actual index
+  // with listSnapshots before asserting the ~N ref.
   await w.newSession();
   const plan2 = await snapshotInvert('~2', null, ctx); // SAME anchor — now aged to ~2
   assert.equal(plan2.ops.length, 1, 'only the route op remains');
@@ -246,7 +257,10 @@ test('STORY long-week: 5 sessions of pipeline + human edits — summaries and th
   // the journal tells the whole story: initial + every changed session
   const { entries, skippedLines } = await readLog(w.dir, 50);
   assert.equal(skippedLines, 0);
-  assert.ok(entries.length >= 4);
+  // 4 entries: S1 newSession = initial, S2 newSession = 1 moved + 1 relabeled,
+  // S3 newSession = 1 added + 1 removed (archive), S4 newSession = 1 moved + 1 retitled.
+  // S5 is deduped (board unchanged) — no entry written.
+  assert.equal(entries.length, 4, 'initial + S2 + S3 + S4 — S5 deduped, no spurious entry');
   const total = entries.reduce((acc, e) => acc + (e.initial ? 0 :
     e.moved.length + e.added.length + e.removed.length + e.relabeled.length + e.retitled.length), 0);
   assert.ok(total >= 5, `journal recorded the week (${total} events)`);
@@ -278,5 +292,10 @@ test('STORY messy-repo: dismissed-but-live + vanished cards reconcile with ZERO 
   const writes = w.engine.calls.slice(callsBefore)
     .filter((c) => ['createIssue', 'setStage', 'setLabels', 'removeLabels', 'addIssueToBoard', 'comment'].includes(c.op));
   assert.deepEqual(writes, [], 'reconcile NEVER writes the board');
+  // 'keep' action in reconcileApply does NO ledger mutation — it only pushes to
+  // report.kept (line 804: "untouched; resurfaces next scan"). So the user's prior
+  // ledger-level dismissal is preserved exactly as written.
+  const after = await rl(w.dir);
+  assert.equal(after.candidates.find((c) => c.title === 'Dismiss me').status, 'dismissed', "'keep' preserves the user's dismissal");
   await w.checkInvariants();
 });
