@@ -1,7 +1,7 @@
 # M5 "Skill Layer" — Design Spec
 
 **Date:** 2026-06-11
-**Status:** Design (approved in brainstorming; pre-plan)
+**Status:** Shipped (reconciled with final implementation)
 **Sub-project:** M5 of the github-boards buildout (see §9).
 **Predecessors:** [M4b spec](2026-06-10-m4b-timetravel-design.md) · [M4a spec](2026-06-10-m4a-reconcile-design.md) · [M3b spec](2026-06-10-m3b-source-adapters-design.md) · [M1 spec](2026-06-08-m1-foundation-design.md)
 
@@ -59,8 +59,8 @@ undo reflex (read-only until the user approves):
   "undo what happened since X"
      → snapshot invert <ref>            CLI prints {ops, manual} + say   (zero writes)
          ops    = [{op:'move',  issueNumber, to}, …]                    (lane restores)
-                  [{op:'relabel', issueNumber, add, remove}, …]         (label restores)
-         manual = added/removed/retitled cards with reasons             (never proposed)
+                  [{op:'route', issueNumber, to:'agent'|'human'}, …]   (PURE owner-flip restores only)
+         manual = added/removed/retitled + non-owner label changes      (never proposed)
      → show user → approval → execute ops via existing move/route verbs → report back
 
 gated LLM harness (manual only):
@@ -76,15 +76,15 @@ New code is **bold**.
 
 | Unit | Responsibility | Interface |
 |---|---|---|
-| **`invertDiff`** (lib/snapshots.mjs) | PURE inverse of a `diffSnapshots` result. | `invertDiff(diff)` → `{ops:[…], manual:[…]}`. `moved {from,to}` → `{op:'move', itemId, issueNumber, title, to:<from>}`; `relabeled {added,removed}` → `{op:'relabel', itemId, issueNumber, title, add:<removed>, remove:<added>}`; `added` → manual `{itemId, issueNumber, title, reason:'filed during this window — archive by hand if unwanted; never auto-deleted'}`; `removed` → manual (`'left the board — not recreated'`); `retitled` → manual (`'no retitle verb — rename by hand'`). Null/empty-bucket tolerant. Ops order: all moves, then all relabels. |
-| **`snapshotInvert`** (board-manager.mjs) | Verb: diff two refs (refB omitted → live board, one `listItems` read) then invert. Zero board writes. | `snapshotInvert(refA, refB, ctx{engine,config,dir})` → `{ops, manual, say}`. Empty diff → say "Nothing to undo …". CLI: `snapshot invert [<ref>] [<ref2>]` (defaults `latest` vs live), prints say + JSON, dispatched beside `snapshot diff` (loadConfig path; honors `--config`). Unknown-sub Tier-0 guard updated to admit `invert`. |
-| **`SKILL.md`** | Teach the full pipeline + reflexes. | Frontmatter description adds trigger phrases: "promote the backlog", "sync my TODOs onto the board", "heal the ledger / is the board out of sync", "what changed this week", "what did the board look like before", "undo what happened since". Body adds: verb-table rows (`promote scan\|apply`, `sync scan\|record`, `reconcile scan\|apply`, `snapshot take\|list\|diff\|log\|invert`); a **session-start & real-time** section (hooks inject the summary digest and once-per-file change notes unprompted — don't re-run summary redundantly); the **undo reflex** (3 lines, linking the contract); a **pipeline map** (sync → ledger → map → promote → board; reconcile + snapshots as maintenance loops). Existing six hard rules and `AGENTS.md`-mirror sentence kept verbatim. |
+| **`invertDiff`** (lib/snapshots.mjs) | PURE inverse of a `diffSnapshots` result. | `invertDiff(diff, routing)` → `{ops:[…], manual:[…]}`. `moved {from,to}` → `{op:'move', itemId, issueNumber, title, to:<from>}`; `relabeled` with a PURE owner-label flip (exactly 1-add/1-remove matching `config.routing`) → `{op:'route', itemId, issueNumber, title, to:'agent'\|'human'}`; any other label change → `manual` (`'no generic relabel verb; adjust by hand'`); `added` → manual (`'filed during this window — archive by hand if unwanted; never auto-deleted'`); `removed` → manual (`'left the board — not recreated'`); `retitled` → manual (`'no retitle verb — rename by hand'`). Null/empty-bucket tolerant. Ops order: all moves, then all routes. There is **no `{op:'relabel'}` — non-owner label changes are always `manual`.** |
+| **`snapshotInvert`** (board-manager.mjs) | Verb: diff two refs (refB omitted → live board, one `listItems` read) then invert. Zero board writes. | `snapshotInvert(refA, refB, ctx{engine,config,dir})` → `{ops, manual, say}`. Empty diff (both empty + no manual) → say "Nothing to undo between A and B." When refB is null and >1 snapshot exists, the say also appends the **ANCHOR-TRAP hint**: "Note: summary auto-snapshots the current board, so the newest snapshot may already reflect these changes — run `snapshot list` and pick an older ref." (H2 final-review addition.) CLI: `snapshot invert [<ref>] [<ref2>]` (defaults latest vs live), goes through `loadConfig` (needs `config.routing` + engine); Tier-0 guard admits `invert`. |
+| **`SKILL.md`** | Teach the full pipeline + reflexes. | Frontmatter description adds trigger phrases: "promote the backlog", "sync my TODOs onto the board", "heal the ledger / is the board out of sync", "what changed this week", "what did the board look like before", "undo what happened since". Body adds: verb-table rows with **positional** `queue human\|agent` (there is no `--owner` flag — the owner token is the second positional arg); `reshape` described as **read-only** (diffs Stage options vs preset, prints a do-it-yourself checklist — never writes); hooks claim scoped to configured repos; sub-verb pairs (`promote scan\|apply`, `sync scan\|record`, `reconcile scan\|apply`, `snapshot take\|list\|diff\|log\|invert`); a **session-start & real-time** section (hooks inject the summary digest and once-per-file change notes unprompted — don't re-run summary redundantly); the **undo reflex** (step 1: run `snapshot list` and **pin an explicit anchor** — `latest` is usually the post-change snapshot; then `snapshot invert <anchor>` — this anti-anchor-trap framing is deliberate); a **pipeline map** (sync → ledger → map → promote → board; reconcile + snapshots as maintenance loops). The undo-contract reference discloses that `route` to human posts an escalation comment, and scopes the re-run-safety invariant to the vs-live case. Existing six hard rules and `AGENTS.md`-mirror sentence kept verbatim. |
 | **`references/undo-contract.md`** | Full undo contract. | When to trigger; run `snapshot invert`; preview `ops`+`manual` to the user; on approval execute `ops` one-by-one via `move`/`route` (each already approval-gated/staged-capable); never act on `manual` items; report back; what to say when `ops` is empty but `manual` isn't. |
 | **`AGENTS.md`** | Vendor-neutral mirror. | SKILL.md body (everything below the frontmatter) byte-identical, prefixed by a 2–3 line plain header (title + "this mirrors skills/github-boards/SKILL.md; do not edit separately"). The drift gate enforces identity of the shared body. |
 | **`commands/board.md`** | `/board` keeps parity. | Verb list extended with promote/sync/reconcile/snapshot (+invert) and the `--staged` note unchanged. |
 | **`tests/skill-evals.test.mjs`** | The drift gates. | Spawns `node scripts/board-manager.mjs --help` (execFile, fs-only), parses verb tokens from help lines; asserts each token appears in SKILL.md AND commands/board.md; strips frontmatter and asserts AGENTS.md shared body equals SKILL.md body; sentinel-asserts the six hard rules, each frontmatter trigger phrase, and that every `references/…` path SKILL.md mentions exists. |
-| **`evals/scenarios.json`** | Fixture corpus. | ~15–20 of `{id, say, expectVerb, expectArgs?}` covering every verb family + ≥3 negatives (`expectVerb: null` — e.g. "move this function into utils.mjs" must trigger nothing). |
-| **`scripts/eval-skill.mjs`** | Gated runner. | Refuses without `GBS_EVAL=1` (live-gate-style message). Per scenario: `claude -p` with a fixed prompt embedding SKILL.md body + the scenario `say`, demanding JSON `{verb: string\|null}`; grade vs `expectVerb`; scorecard to stdout (per-scenario pass/fail + totals). Exits non-zero if `claude` CLI missing, with a plain message. Advisory only. |
+| **`evals/scenarios.json`** | Fixture corpus. | 20 fixtures of `{id, say, expectVerb, expectArgs?}` covering every verb family (17 positive + 3 negatives); the count grew from the original ~15 target after adding `reshape`, `bootstrap`, and `ledger` scenarios. ≥3 negatives (`expectVerb: null`). The test gate asserts `sc.length >= 15` and `negatives >= 3`. |
+| **`scripts/eval-skill.mjs`** | Gated runner. | Refuses without `GBS_EVAL=1` (live-gate-style message). Per scenario: `claude -p --output-format text --model <GBS_EVAL_MODEL\|\|haiku>`, prompt passed via **stdin** (not a file arg), `shell: true` on win32 (`.cmd` shim). The prompt embeds the **full SKILL.md** including frontmatter — deliberate deviation from "body only": the description aids triggering. Demands JSON `{verb: string\|null, args: string}`; unparseable output **fails** that scenario (counted, not fatal). Infra-failure guard: `r.error \|\| r.status === null \|\| (r.status !== 0 && !(r.stdout\|\|'').trim())` → exit 1 (covers win32 empty-stdout case). Grade vs `expectVerb` (and `expectArgs` when present); scorecard to stdout (per-scenario pass/fail + totals). Advisory only. |
 
 ## 5. Error handling
 
@@ -98,19 +98,21 @@ New code is **bold**.
 
 All deterministic unless gated. Temp dirs, mock engine, no live surface, no LLM calls in `npm test`.
 
-1. **`invertDiff` unit** (append to `tests/snapshots.test.mjs`): moved → inverse move (from/to swapped); relabeled → add/remove swapped; retitled/added/removed → `manual` with the exact reasons; empty/null diff → empty result; multi-bucket card → one op per inversion, moves ordered before relabels.
-2. **`snapshotInvert` verb** (append to `tests/snapshot-verb.test.mjs`): two refs; ref vs live (exactly one `listItems`, and `engine.calls` contains NO createIssue/setStage/setLabels/addIssueToBoard/comment — the read-only promise pinned); empty-diff say; manual rendering.
-3. **Drift gates** (`tests/skill-evals.test.mjs`): the assertions in §4 — incl. a meta-check that the help parser found a sane number of verbs (≥ 10) so a help-format change can't silently turn the gates into no-ops.
+1. **`invertDiff` unit** (append to `tests/snapshots.test.mjs`): moved → inverse move (from/to swapped); PURE owner-label flip (1-add/1-remove matching `config.routing`) → `{op:'route'}` with correct `to`; non-owner label change → `manual`; retitled/added/removed → `manual` with the exact reasons; empty/null diff → empty result; multi-bucket card → one op per inversion, moves ordered before routes.
+2. **`snapshotInvert` verb** (append to `tests/snapshot-verb.test.mjs`): two refs; ref vs live (exactly one `listItems`, and `engine.calls` contains NO createIssue/setStage/setLabels/addIssueToBoard/comment — the read-only promise pinned); empty-diff say; manual rendering; **direction-pinning** (refA is the restore target — older ref first, ops point back to refA state); **anchor-trap hint** (empty diff vs live with >1 snapshot → say includes "older ref" guidance); **extended read-only filter** (`engine.calls` checked to confirm zero writes across all invert paths).
+3. **Drift gates** (`tests/skill-evals.test.mjs`): the assertions in §4 — incl. a meta-check that the help parser found a sane number of verbs (**≥ 12**) so a help-format change can't silently turn the gates into no-ops.
 4. **Cross-module reality check** (standing lesson; `tests/skill-evals.test.mjs` or a sibling): REAL chain — `writeSnapshot` baseline from the stateful mock board → mutate via the engine's own `setStage`/`setLabels` → real `snapshotDiff` → real `invertDiff` → execute the proposed ops back through the engine's `setStage`/`setLabels` → final `diffSnapshots(baseline, live)` is empty for surviving cards. No hand-built diff fixtures at the boundary.
 5. **Gated harness** (never in `npm test`): `GBS_EVAL=1 node scripts/eval-skill.mjs` — manual, advisory.
 
+**Test inventory (post-M5):** 387 tests total / 384 pass / 3 gated skips (live tests guarded by `GBS_LIVE=1`).
+
 **Safety rule (standing, extends GBS_LIVE):** `GBS_EVAL=1` is operator-only. Never set it in automated/subagent runs; the runner's refusal is the enforcement backstop.
 
-## 7. Open questions (resolve/verify at plan time)
+## 7. Open questions → resolved
 
-- **Help-token parsing**: verify the exact `--help` line format (column layout, sub-verb spellings like `promote scan|apply`) and pick a tolerant token extractor; the ≥10 meta-check guards it.
-- **`claude -p` invocation shape**: verify headless flags (`-p`, output format) on the installed CLI at plan time; keep the prompt fixed and minimal.
-- **`relabel` op execution**: `route` flips owner labels; arbitrary label restores may need `move`-adjacent handling — verify which existing verb (or `setLabels` via which verb) executes a generic relabel, and have `undo-contract.md` say exactly that. If only owner-label swaps are executable today, non-owner relabels land in `manual` (decide at plan time from the real verb surface).
+- **Help-token parsing** ✅: regex `/^ {2}([a-z][\w-]*)\b/` extracts the first token from each two-space-indented help line. The shipped verb set is 15 tokens; the meta-check threshold is **≥ 12** (not ≥10), which guards against a help-format regression silently collapsing the gate.
+- **`claude -p` invocation shape** ✅: `claude -p --output-format text --model <GBS_EVAL_MODEL||haiku>`, prompt delivered via **stdin**, `shell: true` on win32 to resolve the `.cmd` shim. Infra-failure guard covers the win32 empty-stdout case (`r.status !== 0 && !(r.stdout||'').trim()`), exiting 1 with a plain diagnostic.
+- **`relabel` op execution** ✅: only PURE owner-label flips (exactly 1-add/1-remove both matching `config.routing` entries) become `{op:'route'}`. There is **no `{op:'relabel'}` op** — everything else (multi-label changes, non-routing labels) goes directly to `manual` with the reason `"no generic relabel verb; adjust by hand"`. The undo-contract documents this scoping explicitly.
 
 ## 8. Module context
 
@@ -121,5 +123,5 @@ All deterministic unless gated. Temp dirs, mock engine, no live surface, no LLM 
 | **M3a/b/c** | Promote · source adapters · real-time signal | ✅ shipped |
 | **M4a · Reconcile** | Drift detection + ledger-only healing | ✅ shipped |
 | **M4b · Time-travel** | Snapshots + permanent event log (read-only) | ✅ shipped |
-| **M5 · Skill layer** *(this spec)* | SKILL.md, triggering, evals, undo reflex | designing |
+| **M5 · Skill layer** *(this spec)* | SKILL.md, triggering, evals, undo reflex | ✅ shipped |
 | **M6 · Verification & simulation** | Unit + simulation + live integration | backlog |
