@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
-import { diffSnapshots, stampFor, resolveKeep, writeSnapshot, listSnapshots, readLog, resolveRef, readSnapshot } from '../scripts/lib/snapshots.mjs';
+import { diffSnapshots, stampFor, resolveKeep, writeSnapshot, listSnapshots, readLog, resolveRef, readSnapshot, invertDiff } from '../scripts/lib/snapshots.mjs';
 
 const tmp = () => mkdtempSync(join(os.tmpdir(), 'gbs-snap-'));
 
@@ -244,4 +244,57 @@ test('writeSnapshot: failed log append rolls back the snapshot file — retry st
   const { entries } = await readLog(dir, 10);
   assert.equal(entries.length, 1);
   assert.equal(entries[0].initial, true);
+});
+
+const ROUTING = { agent: 'agent:go', human: 'needs-claude' };
+
+test('invertDiff: moved -> inverse move (from/to swapped)', () => {
+  const inv = invertDiff({ moved: [{ itemId: 'it-1', issueNumber: 1, title: 'Card 1', from: 'Ideas', to: 'Building' }], added: [], removed: [], relabeled: [], retitled: [] }, ROUTING);
+  assert.deepEqual(inv.ops, [{ op: 'move', itemId: 'it-1', issueNumber: 1, title: 'Card 1', to: 'Ideas' }]);
+  assert.deepEqual(inv.manual, []);
+});
+
+test('invertDiff: pure owner-flip relabel -> route op back to the previous owner', () => {
+  // A->B the card went human->agent (gained agent:go, lost needs-claude); undo routes back to human
+  const inv = invertDiff({ moved: [], added: [], removed: [], retitled: [], relabeled: [{ itemId: 'it-1', issueNumber: 1, title: 'Card 1', added: ['agent:go'], removed: ['needs-claude'] }] }, ROUTING);
+  assert.deepEqual(inv.ops, [{ op: 'route', itemId: 'it-1', issueNumber: 1, title: 'Card 1', to: 'human' }]);
+  assert.deepEqual(inv.manual, []);
+});
+
+test('invertDiff: non-owner relabel -> manual (no generic relabel verb)', () => {
+  const inv = invertDiff({ moved: [], added: [], removed: [], retitled: [], relabeled: [{ itemId: 'it-1', issueNumber: 1, title: 'Card 1', added: ['bug'], removed: [] }] }, ROUTING);
+  assert.equal(inv.ops.length, 0);
+  assert.equal(inv.manual.length, 1);
+  assert.match(inv.manual[0].reason, /no generic relabel verb/);
+});
+
+test('invertDiff: added/removed/retitled -> manual with the exact reasons', () => {
+  const inv = invertDiff({
+    moved: [],
+    added: [{ itemId: 'it-9', issueNumber: 9, title: 'New card' }],
+    removed: [{ itemId: 'it-8', issueNumber: 8, title: 'Gone card' }],
+    relabeled: [],
+    retitled: [{ itemId: 'it-7', issueNumber: 7, from: 'Old', to: 'New' }],
+  }, ROUTING);
+  assert.equal(inv.ops.length, 0);
+  assert.equal(inv.manual.length, 3);
+  assert.match(inv.manual.find((m) => m.itemId === 'it-9').reason, /never auto-deleted/);
+  assert.match(inv.manual.find((m) => m.itemId === 'it-8').reason, /not recreated/);
+  assert.match(inv.manual.find((m) => m.itemId === 'it-7').reason, /no retitle verb/);
+});
+
+test('invertDiff: null/empty tolerated; ops order is moves then routes; no routing -> flips go manual', () => {
+  assert.deepEqual(invertDiff(null, ROUTING), { ops: [], manual: [] });
+  assert.deepEqual(invertDiff({}, null), { ops: [], manual: [] });
+  const inv = invertDiff({
+    moved: [{ itemId: 'it-2', issueNumber: 2, title: 'C2', from: 'Ideas', to: 'Building' }],
+    relabeled: [{ itemId: 'it-1', issueNumber: 1, title: 'C1', added: ['needs-claude'], removed: ['agent:go'] }],
+    added: [], removed: [], retitled: [],
+  }, ROUTING);
+  assert.deepEqual(inv.ops.map((o) => o.op), ['move', 'route']);
+  assert.equal(inv.ops[1].to, 'agent'); // went agent->human; undo routes back to agent
+  // without routing context, the same flip is not safely executable
+  const noCtx = invertDiff({ moved: [], added: [], removed: [], retitled: [], relabeled: [{ itemId: 'it-1', issueNumber: 1, title: 'C1', added: ['needs-claude'], removed: ['agent:go'] }] }, null);
+  assert.equal(noCtx.ops.length, 0);
+  assert.equal(noCtx.manual.length, 1);
 });

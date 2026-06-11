@@ -296,3 +296,50 @@ export async function readLog(dir, n = 20) {
   entries.reverse();
   return { entries: entries.slice(0, Math.max(0, n)), skippedLines };
 }
+
+/**
+ * PURE inverse of a diffSnapshots() result: what would put the board back.
+ * Only mechanically executable inversions become ops — a move restores a lane;
+ * a route restores a PURE owner-label flip (requires `routing`). Everything
+ * else lands in `manual` with a reason: added cards are NEVER proposed for
+ * deletion, removed cards are never recreated, retitles have no verb.
+ * Ops order: all moves first, then route flips.
+ * @param {object|null} diff   {moved, added, removed, relabeled, retitled}
+ * @param {{agent:string, human:string}|null} [routing]  config.routing
+ * @returns {{ops:object[], manual:object[]}}
+ */
+export function invertDiff(diff, routing = null) {
+  const d = diff || {};
+  const moveOps = [];
+  const routeOps = [];
+  const manual = [];
+
+  for (const m of d.moved || []) {
+    moveOps.push({ op: 'move', itemId: m.itemId, issueNumber: m.issueNumber ?? null, title: m.title ?? null, to: m.from ?? null });
+  }
+  for (const r of d.relabeled || []) {
+    const invAdd = [...(r.removed || [])].sort();   // undo restores what was removed…
+    const invRemove = [...(r.added || [])].sort();  // …and strips what was added
+    const flip = routing && invAdd.length === 1 && invRemove.length === 1;
+    if (flip && invAdd[0] === routing.agent && invRemove[0] === routing.human) {
+      routeOps.push({ op: 'route', itemId: r.itemId, issueNumber: r.issueNumber ?? null, title: r.title ?? null, to: 'agent' });
+    } else if (flip && invAdd[0] === routing.human && invRemove[0] === routing.agent) {
+      routeOps.push({ op: 'route', itemId: r.itemId, issueNumber: r.issueNumber ?? null, title: r.title ?? null, to: 'human' });
+    } else {
+      manual.push({
+        itemId: r.itemId, issueNumber: r.issueNumber ?? null, title: r.title ?? null,
+        reason: `labels changed (+[${(r.added || []).join(', ')}] -[${(r.removed || []).join(', ')}]) — no generic relabel verb; adjust by hand`,
+      });
+    }
+  }
+  for (const a of d.added || []) {
+    manual.push({ itemId: a.itemId, issueNumber: a.issueNumber ?? null, title: a.title ?? null, reason: 'filed during this window — archive by hand if unwanted; never auto-deleted' });
+  }
+  for (const x of d.removed || []) {
+    manual.push({ itemId: x.itemId, issueNumber: x.issueNumber ?? null, title: x.title ?? null, reason: 'left the board — not recreated' });
+  }
+  for (const t of d.retitled || []) {
+    manual.push({ itemId: t.itemId, issueNumber: t.issueNumber ?? null, title: `${t.from ?? ''} → ${t.to ?? ''}`, reason: 'no retitle verb — rename by hand' });
+  }
+  return { ops: [...moveOps, ...routeOps], manual };
+}
