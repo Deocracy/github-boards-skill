@@ -17,6 +17,7 @@ export function makeMockEngine(overrides = {}) {
   return {
     calls,
     listItems:      rec('listItems'),
+    listItemsWithBodies: rec('listItemsWithBodies'),
     getStageField:  rec('getStageField'),
     createIssue:    rec('createIssue'),
     addIssueToBoard: guarded('addIssueToBoard', (issueUrl) => {

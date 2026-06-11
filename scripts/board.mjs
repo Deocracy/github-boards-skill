@@ -231,7 +231,7 @@ function getStageField(cfg, { force } = {}) {
 
 // listItems — paginated GraphQL (Invariant: Invariant-5 / build-req 5).
 // NEVER `gh project item-list --format json`.
-function listItems(cfg, { pageSize = 50 } = {}) {
+function listItems(cfg, { pageSize = 50, withBodies = false } = {}) {
   const items = [];
   let cursor = null;
   // Stage is read by the CONFIGURED field id (match field.id === stageFieldId),
@@ -258,7 +258,7 @@ function listItems(cfg, { pageSize = 50 } = {}) {
               content {
                 __typename
                 ... on Issue {
-                  number title state
+                  number title state ${withBodies ? 'body url' : ''}
                   repository { nameWithOwner }
                   labels(first:20) { nodes { name } }
                 }
@@ -300,6 +300,7 @@ function listItems(cfg, { pageSize = 50 } = {}) {
         repo: c.repository?.nameWithOwner ?? null,
         stageLabel: stageVal?.name ?? null,
         labels: (c.labels?.nodes || []).map((l) => l.name),
+        ...(withBodies ? { body: c.body ?? null, issueUrl: c.url ?? null } : {}),
       });
     }
     if (!conn.pageInfo.hasNextPage) break;

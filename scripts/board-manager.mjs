@@ -9,6 +9,7 @@
 //
 // THE DI CONTRACT (verbs only ever touch the engine through these methods):
 //   engine.listItems()                                  -> { items:[{itemId,issueNumber,title,stageLabel,labels[]}], count }
+//   engine.listItemsWithBodies()                        -> { items:[{itemId,issueNumber,title,stageLabel,labels[],body,issueUrl}], count }
 //   engine.getStageField()                              -> { fieldId, fieldName, options:[{label,optionId}] }
 //   engine.createIssue(title, body, {labels,staged})    -> { issueNodeId, number, url, contentType } | { staged, wouldRun }
 //   engine.addIssueToBoard(issueUrl, {staged})          -> { itemId } | { staged, wouldRun }
@@ -937,6 +938,7 @@ function makeRealEngine(eng, cfg) {
   });
   return {
     listItems: () => eng.listItems(cfg),
+    listItemsWithBodies: () => eng.listItems(cfg, { withBodies: true }),
     getStageField: () => eng.getStageField(cfg),
     createIssue: (title, body, opts = {}) => {
       const flags = flagsFor(opts);
