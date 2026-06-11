@@ -152,10 +152,13 @@ export async function makeWorld({ config } = {}) {
       throw new Error(`invariant no-duplicate-cards: duplicate marker group(s): ${JSON.stringify(drift.duplicates)}`);
     }
 
-    // 2. ledger<->board: refs-bearing non-final candidates must be classified resume-pending
+    // 2. ledger<->board: refs-bearing non-final candidates whose card REACHED the board
+    //    must be classified resume-pending. Off-board partials (A2 window: issue + refs
+    //    persisted but addIssueToBoard died) are invisible to board-scoped classifyDrift
+    //    by design — promote's own resume guard recovers them, so itemId == null here.
     const resumeIds = new Set(drift.resumePending.map((r) => r.candidateId ?? r.id));
     for (const c of ledger.candidates || []) {
-      if (c.promotion && c.promotion.issueNumber != null && c.status !== 'promoted' && c.status !== 'dismissed') {
+      if (c.promotion && c.promotion.issueNumber != null && c.promotion.itemId != null && c.status !== 'promoted' && c.status !== 'dismissed') {
         if (!resumeIds.has(c.id)) {
           throw new Error(`invariant ledger-board: candidate ${c.id} has live refs but is not classified resume-pending`);
         }

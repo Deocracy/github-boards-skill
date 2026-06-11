@@ -150,3 +150,16 @@ test('checkInvariants: resume-pending candidates must be classifiable, not lost'
   // checkInvariants must pass (classifiable) — not throw.
   await w.checkInvariants();
 });
+
+test('checkInvariants: A2 crash state (refs persisted, card never reached board) is LEGAL — invisible to reconcile, promote resumes', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['One']);
+  await w.ops.pipelineSync(); await w.ops.mapAll();
+  await w.ops.crashedPromote('A2'); // addIssueToBoard died
+  await w.checkInvariants();        // must NOT throw — legal resumable state
+  await w.ops.promoteAll();         // resume completes on the SAME issue
+  const { items } = await w.engine.listItems();
+  assert.equal(items.length, 1);
+  assert.equal(items[0].issueNumber, 1, 'resumed, not re-created');
+  await w.checkInvariants();
+});
