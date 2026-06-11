@@ -32,6 +32,7 @@ import { classify, resolveDecisions, cidMarker } from './lib/promote.mjs';
 import { PROFILES } from './lib/profiles.mjs';
 import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction, WATCH_GLOB_RE } from './lib/sources.mjs';
 import { classifyDrift, resolveReconcileDecisions } from './lib/reconcile.mjs';
+import { writeSnapshot, listSnapshots, readSnapshot, readLog, diffSnapshots, resolveKeep } from './lib/snapshots.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -940,6 +941,88 @@ export async function promoteApply(decisions, ctx) {
   return { report, say };
 }
 
+// ===========================================================================
+// M4b SNAPSHOTS — versioned board memory: take/list/diff + the event log.
+// Read-only toward the board; owns nothing but .github-boards/snapshots/.
+// ===========================================================================
+
+/**
+ * snapshotTake(label, ctx) — manual save-point. Same dedup/prune/log as the
+ * summary piggyback. Loud on failure (user-invoked).
+ * @param {string|null} label
+ * @param {object} ctx { engine, config, dir }
+ * @returns {Promise<{result:object, say:string}>}
+ */
+export async function snapshotTake(label, ctx) {
+  const dir = ctx.dir || process.cwd();
+  const { items } = await ctx.engine.listItems();
+  const r = await writeSnapshot(dir, items || [], { label: label || null, keep: resolveKeep(ctx.config) });
+  const say = r.skipped
+    ? `Snapshot skipped — ${r.reason}.`
+    : `Snapshot saved: ${(items || []).length} card(s)${label ? ` ("${label}")` : ''}.`;
+  return { result: r, say };
+}
+
+/**
+ * snapshotList(ctx) — newest-first index of stored snapshots. fs-only.
+ * @param {object} ctx { dir }
+ * @returns {Promise<{snapshots:object[], say:string}>}
+ */
+export async function snapshotList(ctx) {
+  const dir = ctx.dir || process.cwd();
+  const snapshots = await listSnapshots(dir);
+  const say = snapshots.length
+    ? `${snapshots.length} snapshot(s); newest ${snapshots[0].takenAt}${snapshots[0].label ? ` ("${snapshots[0].label}")` : ''}.`
+    : 'No snapshots yet — run summary or `snapshot take` first.';
+  return { snapshots, say };
+}
+
+/**
+ * snapshotDiff(refA, refB, ctx) — pure diff between two snapshots, or between
+ * a snapshot and the LIVE board when refB is null (one listItems read).
+ * @param {string} refA
+ * @param {string|null} refB
+ * @param {object} ctx { engine, config, dir }
+ * @returns {Promise<{diff:object, say:string}>}
+ */
+export async function snapshotDiff(refA, refB, ctx) {
+  const dir = ctx.dir || process.cwd();
+  const a = await readSnapshot(dir, refA);
+  let bItems;
+  let bName;
+  if (refB) {
+    const b = await readSnapshot(dir, refB);
+    bItems = b.items;
+    bName = b.takenAt;
+  } else {
+    const { items } = await ctx.engine.listItems();
+    bItems = items || [];
+    bName = 'live board';
+  }
+  const d = diffSnapshots(a.items, bItems);
+  const total = d.moved.length + d.added.length + d.removed.length + d.relabeled.length + d.retitled.length;
+  const say = total === 0
+    ? `No changes between ${a.takenAt} and ${bName}.`
+    : `Since ${a.takenAt} (vs ${bName}): ${d.moved.length} moved, ${d.added.length} added, ` +
+      `${d.removed.length} removed, ${d.relabeled.length} relabeled, ${d.retitled.length} retitled.`;
+  return { diff: d, say };
+}
+
+/**
+ * snapshotLog(n, ctx) — the last n events from the permanent journal. fs-only.
+ * @param {number} n
+ * @param {object} ctx { dir }
+ * @returns {Promise<{entries:object[], skippedLines:number, say:string}>}
+ */
+export async function snapshotLog(n, ctx) {
+  const dir = ctx.dir || process.cwd();
+  const { entries, skippedLines } = await readLog(dir, n);
+  const say = entries.length
+    ? `${entries.length} event(s)${skippedLines ? ` (${skippedLines} corrupted line(s) skipped)` : ''}.`
+    : 'No events recorded yet.';
+  return { entries, skippedLines, say };
+}
+
 /**
  * ownerOf — determine who owns a card based on routing labels.
  * Returns 'agent' | 'human' | null.
@@ -996,15 +1079,32 @@ export async function summary(ctx) {
     say = `Since last time: ${d.moved.length} moved, ${d.added.length} new, ${rejected.length} rejected. ${sayQueues(human, agent)}`;
   }
 
-  // 7. Persist state (always — not a board write)
-  const snapshot = { seenAt: new Date().toISOString(), items: currentMap };
-  await writeState(dir, snapshot);
+  // 7–9. Persist state, teamSync, and M4b versioned snapshot.
+  // All three write under .github-boards/; wrap together so a filesystem
+  // failure (e.g. the dir is not writable) is non-fatal — history must never
+  // break summary, and the session-start hook calls summary.
+  let snapNote = '';
+  try {
+    // 7. Persist state (always — not a board write)
+    const snapshot = { seenAt: new Date().toISOString(), items: currentMap };
+    await writeState(dir, snapshot);
 
-  // 8. teamSync opt-in: also write committed last-sync.json
-  if (config.teamSync === true) {
-    const syncPath = join(dir, 'last-sync.json');
-    await writeFile(syncPath, JSON.stringify(snapshot, null, 2), 'utf8');
+    // 8. teamSync opt-in: also write committed last-sync.json
+    if (config.teamSync === true) {
+      const syncPath = join(dir, 'last-sync.json');
+      await writeFile(syncPath, JSON.stringify(snapshot, null, 2), 'utf8');
+    }
+
+    // 9. M4b: versioned snapshot + event log
+    try {
+      await writeSnapshot(dir, items || [], { keep: resolveKeep(config) });
+    } catch (e) {
+      snapNote = ` (snapshot skipped: ${e.message})`;
+    }
+  } catch (e) {
+    snapNote = ` (snapshot skipped: ${e.message})`;
   }
+  say += snapNote;
 
   return { changes: { ...d, rejected }, queues: { human, agent }, say };
 }
