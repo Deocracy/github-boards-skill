@@ -225,6 +225,13 @@ test('readSnapshot: resolves a ref and returns the full snapshot; malformed file
   await assert.rejects(() => readSnapshot(dir, 'latest'), new RegExp(list[0].file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
+test('writeSnapshot: duplicate itemIds collapse (last-wins) — no ghost snapshot, count honest', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [item(1)], {});
+  const r = await writeSnapshot(dir, [item(1), item(1)], {}); // same card twice
+  assert.equal(r.skipped, true, 'dup-inflated board is the same board');
+});
+
 test('writeSnapshot: failed log append rolls back the snapshot file — retry still records the event', async () => {
   const dir = tmp();
   const snapdir = join(dir, '.github-boards', 'snapshots');

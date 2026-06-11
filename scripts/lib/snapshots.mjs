@@ -43,7 +43,12 @@ export function resolveKeep(config) {
   return Number.isInteger(k) && k > 0 ? k : DEFAULT_KEEP;
 }
 
-/** Stable normalization for the dedup hash: itemId-sorted, label-sorted, fixed key set. */
+/**
+ * Stable normalization for the dedup hash: itemId-sorted, label-sorted, fixed key set.
+ * `state`, `repo`, and `contentType` are deliberately excluded — the snapshot store
+ * tracks lane/label/title history (the asked question); state-only changes (e.g. Issue
+ * closed without moving columns) do not create new snapshots per spec.
+ */
 function normalizeForHash(items) {
   return JSON.stringify(
     (items || [])
@@ -146,6 +151,12 @@ export async function writeSnapshot(dir, items, { label = null, keep = DEFAULT_K
   const d = snapDir(dir);
   await mkdir(d, { recursive: true });
 
+  // Collapse duplicate itemIds (GraphQL pagination can return dup nodes when the
+  // board mutates mid-scan) — last-wins, matching diffSnapshots' Map semantics,
+  // so hash, count, stored items and the log diff all see the same set.
+  const byId = new Map((items || []).map((i) => [i.itemId, i]));
+  items = [...byId.values()];
+
   const itemsHash = contentHash(normalizeForHash(items));
   const existing = (await readdir(d)).filter((f) => SNAP_RE.test(f)).sort().reverse();
 
@@ -172,7 +183,7 @@ export async function writeSnapshot(dir, items, { label = null, keep = DEFAULT_K
   }
   const takenAt = stampDate.toISOString();
 
-  const snap = { takenAt, label, count: (items || []).length, itemsHash, items: items || [] };
+  const snap = { takenAt, label, count: items.length, itemsHash, items };
   await writeFile(join(d, file), JSON.stringify(snap, null, 2), 'utf8');
 
   // Event log: append-only, never pruned. One compact line per observed change.
@@ -181,8 +192,8 @@ export async function writeSnapshot(dir, items, { label = null, keep = DEFAULT_K
   // returns {skipped:true}, permanently silencing the event. Compensate by
   // unlinking the just-written snapshot, then rethrow the original append error.
   const entry = prevItems !== undefined
-    ? { at: takenAt, ...diffSnapshots(prevItems, items || []) }
-    : { at: takenAt, initial: true, count: (items || []).length };
+    ? { at: takenAt, ...diffSnapshots(prevItems, items) }
+    : { at: takenAt, initial: true, count: items.length };
   try {
     await appendFile(join(d, LOG_FILE), `${JSON.stringify(entry)}\n`, 'utf8');
   } catch (appendErr) {
