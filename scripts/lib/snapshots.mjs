@@ -176,10 +176,19 @@ export async function writeSnapshot(dir, items, { label = null, keep = DEFAULT_K
   await writeFile(join(d, file), JSON.stringify(snap, null, 2), 'utf8');
 
   // Event log: append-only, never pruned. One compact line per observed change.
+  // Journal integrity: a snapshot without its log line must not survive — if the
+  // append fails the orphaned snapshot becomes the dedup baseline and a RETRY
+  // returns {skipped:true}, permanently silencing the event. Compensate by
+  // unlinking the just-written snapshot, then rethrow the original append error.
   const entry = prevItems !== undefined
     ? { at: takenAt, ...diffSnapshots(prevItems, items || []) }
     : { at: takenAt, initial: true, count: (items || []).length };
-  await appendFile(join(d, LOG_FILE), `${JSON.stringify(entry)}\n`, 'utf8');
+  try {
+    await appendFile(join(d, LOG_FILE), `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (appendErr) {
+    try { await unlink(join(d, file)); } catch { /* best-effort; ignore unlink failure */ }
+    throw appendErr;
+  }
 
   // Prune snapshot FILES beyond keep (the filename filter can never match log.jsonl
   // or foreign files, so they are structurally safe).

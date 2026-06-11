@@ -1,7 +1,7 @@
 // tests/snapshots.test.mjs — M4b snapshot store + event log + pure diff
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmdirSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import { diffSnapshots, stampFor, resolveKeep, writeSnapshot, listSnapshots, readLog, resolveRef, readSnapshot } from '../scripts/lib/snapshots.mjs';
@@ -223,4 +223,18 @@ test('readSnapshot: resolves a ref and returns the full snapshot; malformed file
   const p = join(dir, '.github-boards', 'snapshots', list[0].file);
   writeFileSync(p, '{not json', 'utf8');
   await assert.rejects(() => readSnapshot(dir, 'latest'), new RegExp(list[0].file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('writeSnapshot: failed log append rolls back the snapshot file — retry still records the event', async () => {
+  const dir = tmp();
+  const snapdir = join(dir, '.github-boards', 'snapshots');
+  mkdirSync(join(snapdir, 'log.jsonl'), { recursive: true }); // a DIR where the log FILE goes -> appendFile throws
+  await assert.rejects(() => writeSnapshot(dir, [item(1)], {}));
+  assert.equal(readdirSync(snapdir).filter((f) => f.startsWith('snapshot-')).length, 0, 'orphan snapshot must not survive');
+  rmdirSync(join(snapdir, 'log.jsonl'));
+  const r = await writeSnapshot(dir, [item(1)], {});
+  assert.equal(r.skipped, false);
+  const { entries } = await readLog(dir, 10);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].initial, true);
 });
