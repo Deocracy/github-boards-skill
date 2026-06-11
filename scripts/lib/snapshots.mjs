@@ -200,7 +200,7 @@ export async function writeSnapshot(dir, items, { label = null, keep = DEFAULT_K
  * PURE ref resolution over a newest-first listSnapshots() array.
  * Refs: 'latest' (or null) · '~N' 1-based age index · ISO-stamp prefix
  * ('2026-06-10' -> that day's newest; ':'/'.' forms accepted — normalized to
- * the filename's '-' form). Unresolvable -> legible error with nearest stamps.
+ * the filename's '-' form). Unresolvable -> legible error listing the newest stamps.
  * @param {{file:string}[]} snaps  newest-first
  * @param {string|null} ref
  * @returns {{file:string}} the matching entry
@@ -224,8 +224,8 @@ export function resolveRef(snaps, ref) {
   const hits = snaps.filter((s) => s.file.startsWith(`snapshot-${norm}`));
   if (hits.length) return hits[0]; // newest matching the prefix
 
-  const nearest = snaps.slice(0, 3).map((s) => s.file).join(', ');
-  throw new Error(`snapshot: no snapshot matches '${ref}'. Nearest: ${nearest}`);
+  const recent = snaps.slice(0, 3).map((s) => s.file).join(', ');
+  throw new Error(`snapshot: no snapshot matches '${ref}'. Recent: ${recent}`);
 }
 
 /**

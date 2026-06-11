@@ -204,6 +204,7 @@ test('resolveRef: latest / ~N / date-prefix; legible errors otherwise', () => {
   assert.equal(resolveRef(snaps, '2026-06-10').file, snaps[0].file);     // newest of two
   assert.equal(resolveRef(snaps, '2026-06-10T09').file, snaps[1].file);  // longer prefix narrows
   assert.equal(resolveRef(snaps, '2026-06-10T09:00').file, snaps[1].file); // ':' form accepted
+  assert.equal(resolveRef(snaps, '2026-06-10T09-00-00.000').file, snaps[1].file); // '.' form accepted
   assert.throws(() => resolveRef(snaps, '~4'), /out of range \(1\.\.3\)/);
   assert.throws(() => resolveRef(snaps, '~0'), /out of range/);
   assert.throws(() => resolveRef(snaps, '2030-01-01'), /no snapshot matches/);
