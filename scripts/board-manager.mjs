@@ -734,6 +734,77 @@ export async function reconcileScan(ctx) {
 }
 
 /**
+ * reconcileApply(decisions, ctx) — heal drift, LEDGER-ONLY (the board is never
+ * written; a re-promoted candidate re-enters promote's pipeline, which does the
+ * board work later). Fail-closed: any bad decision refuses the whole run before
+ * a single write. Persist after each item (resumable). Heals are
+ * self-extinguishing — a re-scan after apply is clean (only 'keep' items
+ * intentionally resurface on later scans).
+ * @param {object|null} decisions { [candidateId]: { action } }
+ * @param {object} ctx { engine, config, dir, sourceExists? }
+ * @returns {Promise<{report:object, say:string}>}
+ */
+export async function reconcileApply(decisions, ctx) {
+  const dir = ctx.dir || process.cwd();
+  const { drift } = await reconcileScan(ctx);
+  const { toApply, held, errors } = resolveReconcileDecisions(drift, decisions);
+  if (errors.length) {
+    throw new Error(`reconcile: refused — ${errors.length} bad decision(s): ` +
+      errors.map((e) => `${e.candidateId}: ${e.error}`).join('; '));
+  }
+
+  const ledger = (await readLedger(dir)) || (await ensureLedger(dir));
+  const byId = new Map((ledger.candidates || []).map((c) => [c.id, c]));
+  const report = {
+    healed: [], adopted: [], reset: [], dismissed: [], kept: [],
+    held: held.map((h) => h.candidateId),
+    duplicates: drift.duplicates,
+    errors: [],
+  };
+
+  for (const a of toApply) {
+    const cand = byId.get(a.candidateId);
+    if (a.action === 'settle') {
+      if (!cand) continue; // raced away between scan and apply — next scan re-flags
+      cand.status = 'promoted';
+      cand.promotion = { ...a.refs };
+      await writeLedger(dir, ledger);
+      report.healed.push({ candidateId: a.candidateId, issueNumber: a.refs.issueNumber });
+    } else if (a.action === 'adopt') {
+      if (cand) continue; // already adopted (re-run) — nothing to do
+      const adopted = {
+        id: a.candidateId, title: a.title || '(adopted from board)', note: '',
+        source: 'reconcile:adopted', suggestedLane: null, suggestedOwner: null,
+        addedAt: new Date().toISOString(), status: 'promoted', promotion: { ...a.refs },
+      };
+      ledger.candidates.push(adopted);
+      byId.set(adopted.id, adopted);
+      await writeLedger(dir, ledger);
+      report.adopted.push({ candidateId: a.candidateId, issueNumber: a.refs.issueNumber });
+    } else if (a.action === 're-promote') {
+      if (!cand) continue;
+      cand.status = 'mapped';
+      delete cand.promotion;
+      await writeLedger(dir, ledger);
+      report.reset.push({ candidateId: a.candidateId });
+    } else if (a.action === 'dismiss') {
+      if (!cand) continue;
+      cand.status = 'dismissed';
+      await writeLedger(dir, ledger);
+      report.dismissed.push({ candidateId: a.candidateId });
+    } else if (a.action === 'keep') {
+      report.kept.push({ candidateId: a.candidateId }); // untouched; resurfaces next scan
+    }
+  }
+
+  const say = `Reconcile: ${report.healed.length} healed, ${report.adopted.length} adopted, ` +
+    `${report.reset.length} reset for re-promotion, ${report.dismissed.length} dismissed, ` +
+    `${report.kept.length} kept, ${report.held.length} held` +
+    (report.duplicates.length ? `, ${report.duplicates.length} duplicate group(s) reported` : '') + '.';
+  return { report, say };
+}
+
+/**
  * promotePlan(ctx) — classify the ledger's mapped/needs-decision candidates into
  * promotion buckets. Read-only (no board, no ledger writes).
  * @param {object} ctx { dir, config }
