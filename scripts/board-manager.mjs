@@ -1299,13 +1299,18 @@ async function cli() {
     }
     if (sub === 'log') {
       const n = rest[1] ? Number(rest[1]) : 20;
-      if (Number.isNaN(n)) throw new Error(`snapshot log: '${rest[1]}' is not a number.`);
+      if (!Number.isInteger(n) || n < 1) throw new Error(`snapshot log: N must be a positive integer (got '${rest[1]}').`);
       const r = await snapshotLog(n, { dir: process.cwd() });
       console.log(r.say);
       console.log(JSON.stringify(r.entries, null, 2));
       return;
     }
     // take / diff need the engine — fall through to loadConfig below.
+    // Unknown sub-verbs get a usage error here (before loadConfig) so an
+    // unconfigured repo does not produce a confusing config-not-found error.
+    if (sub !== 'take' && sub !== 'diff') {
+      throw new Error('usage: snapshot <take ["label"] | list | diff <ref> [<ref2>] | log [N]>');
+    }
   }
 
   // The verb-layer config (preset + routing) comes from scripts/lib/config.mjs.
@@ -1439,26 +1444,13 @@ async function cli() {
         console.log(r.say);
         return;
       }
-      if (sub === 'list' || !sub) {
-        const r = await snapshotList({ dir: process.cwd() });
-        console.log(r.say);
-        console.log(JSON.stringify(r.snapshots, null, 2));
-        return;
-      }
       if (sub === 'diff') {
         const r = await snapshotDiff(rest[1] || 'latest', rest[2] || null, { ...ctx, dir: process.cwd() });
         console.log(r.say);
         console.log(JSON.stringify(r.diff, null, 2));
         return;
       }
-      if (sub === 'log') {
-        const n = rest[1] ? Number(rest[1]) : 20;
-        if (Number.isNaN(n)) throw new Error(`snapshot log: '${rest[1]}' is not a number.`);
-        const r = await snapshotLog(n, { dir: process.cwd() });
-        console.log(r.say);
-        console.log(JSON.stringify(r.entries, null, 2));
-        return;
-      }
+      // list, log, and unknown sub-verbs are handled in Tier-0 (above) and never reach here.
       throw new Error('usage: snapshot <take ["label"] | list | diff <ref> [<ref2>] | log [N]>');
     }
     default:
