@@ -39,26 +39,39 @@ reconcile scan        (read-only: one live board read + fs existence probes)
    boardItems = engine.listItemsWithBodies()        ← NEW engine read op
    parseCid(item.body) per item (reuses lib/promote.parseCid)
    classifyDrift({ledger, items, sourceExists}):
-     • marker ↔ candidate match, cand NOT promoted   → CRASH-ORPHAN  (safe heal)
-     • marker matches NO candidate                   → UNKNOWN-MARKER (safe heal: adopt)
-     • promoted cand, no live item carries it        → VANISHED      (needs-decision)
-     • unpromoted cand, source file gone             → DEAD-SOURCE   (needs-decision)
-     • two live items, same cid                      → DUPLICATES    (report-only)
-   → prints { safeHeals[], uncertain[], duplicates[], clean }
+     • marker live, unsettled cand WITH promotion refs → RESUME-PENDING (report-only:
+         promote's chain may be unfinished — `promote apply` resumes + settles it;
+         settling here would foreclose the resume and freeze a half-configured card)
+     • marker live, unsettled cand, NO refs            → CRASH-ORPHAN  (safe heal —
+         refs-lost states: ledger restored/wiped/hand-edited; settling prevents a
+         duplicate issue for the same cid)
+     • marker live, cand DISMISSED                     → DISMISSED-BUT-LIVE (needs-decision:
+         auto-resurrecting would reverse deliberate intent — ask settle|keep)
+     • marker matches NO candidate                     → UNKNOWN-MARKER (safe heal: adopt)
+     • promoted cand, no live item carries it          → VANISHED      (needs-decision)
+     • unpromoted cand, source file gone, AND not
+       already marker-classified above                 → DEAD-SOURCE   (needs-decision)
+     • two live items, same cid                        → DUPLICATES    (report-only)
+   → prints { safeHeals[], resumePending[], uncertain[], duplicates[], clean }
         │
    Claude gathers decisions for uncertain items (AskUserQuestion → decisions file):
-     { "<candidateId>": { "action": "re-promote" | "dismiss" | "keep" } }
+     { "<candidateId>": { "action": "re-promote" | "dismiss" | "keep" | "settle" } }
         │
-reconcile apply [--decisions <file>]   (LEDGER-ONLY writes, fail-closed)
+reconcile apply [--decisions <file>]   (LEDGER-ONLY writes, fail-closed; --staged is
+                                        REFUSED — `reconcile scan` IS the preview)
    safe heals auto-apply on every run:
      crash-orphan  → status→'promoted', promotion refs adopted from the live item
-     unknown-marker→ append candidate {id: cid, …, status:'promoted', refs}
+     unknown-marker→ new candidate {id: cid, …, status:'promoted', refs}
    decided uncertain items:
      re-promote → status→'mapped', promotion deleted  (promote re-creates later)
      dismiss    → status→'dismissed'
+     settle     → status→'promoted', refs adopted      (dismissed-but-live only)
      keep       → untouched, reported (resurfaces on later scans)
+   resume-pending → passes through to the report untouched (promote's job;
+                    a decision naming one is refused)
    undecided uncertain → held (never blocks the safe heals)
-   → report { healed[], adopted[], reset[], dismissed[], held[], duplicates[], errors[] }
+   → report { healed[], adopted[], reset[], dismissed[], kept[], held[],
+              resumePending[], duplicates[], errors[] }
 ```
 
 ## 4. Components & interfaces
@@ -75,20 +88,22 @@ New code is **bold**. Same pure-module + injectable-engine pattern as M1–M3.
 ### Classification details (`classifyDrift` is pure)
 
 - **Marker index:** `parseCid(item.body)` over all items → `cid → item[]` map. Items without markers (hand-made cards) are ignored — reconcile governs only skill-created cards.
-- **crash-orphan** (safe): a marker's cid matches a candidate with `status !== 'promoted'`. Heal = `status→'promoted'`, `promotion = {issueNumber, itemId}` (+`issueUrl` if derivable) adopted from the live item.
-- **unknown-marker** (safe): cid matches no candidate (ledger wiped/regenerated). Heal = append candidate `{id: cid, title: item.title, source: 'reconcile:adopted', status: 'promoted', promotion: {…refs}}`. The explicit `id` (the marker's cid) wins over a fresh title-hash so future scans match. (`appendCandidate` already accepts an explicit `id`.)
-- **vanished** (uncertain): candidate `status === 'promoted'` with `promotion.issueNumber`, but no live item carries its marker **or** its issueNumber. The question carries the candidate title + last-known refs; allowed actions `re-promote | dismiss | keep`.
-- **dead-source** (uncertain): candidate in `{candidate, mapped, needs-decision}` whose `source` names a file (the part before `#`) that fails `sourceExists` — only when the source **looks like a path** (contains `/` or ends `.md`/known file shape); non-path sources (`manual`, `reconcile:adopted`) are exempt. Allowed actions `dismiss | keep`.
-- **duplicates** (report-only): a cid carried by ≥2 live items. First match (lowest issueNumber) is used for any healing; the rest are listed in `duplicates[]`.
+- **resume-pending** (report-only): a marker's cid matches an unsettled candidate that still **carries `promotion` refs**. This is the only crash state a board scan can actually observe (M3a persists refs before an item can appear on the board), and promote's resume needs it: `promote apply` skips `createIssue`, finishes `setStage`/`setLabels`, and settles the status itself. Reconcile must NOT settle it — that would freeze a half-configured card (no lane, no routing label) forever. Reported with a "run `promote apply`" hint; decisions naming it are refused.
+- **crash-orphan** (safe): a marker's cid matches an unsettled, non-dismissed candidate with **no `promotion` refs** — unreachable from a real M3a crash, but reachable via ledger restore/wipe/hand-edit. Heal = `status→'promoted'`, refs adopted from the live item (prevents promote creating a duplicate issue for the same cid).
+- **dismissed-but-live** (uncertain): the cid's candidate is `dismissed` yet its card is live. Auto-resurrecting would silently reverse deliberate user intent; leaving it would drift forever. Allowed actions `settle | keep`.
+- **unknown-marker** (safe): cid matches no candidate (ledger wiped/regenerated). Heal = new candidate `{id: cid, title: item.title, source: 'reconcile:adopted', status: 'promoted', promotion: {…refs}}` written directly by `reconcileApply` (NOT via `appendCandidate`, which hardcodes `status:'candidate'` and drops `promotion`). The explicit `id` (the marker's cid) ensures future scans match.
+- **vanished** (uncertain): candidate `status === 'promoted'` with `promotion.issueNumber`, but no live item carries its marker **or** its issueNumber. The question carries the candidate title + last-known refs; allowed actions `re-promote | dismiss | keep`. *Known limitation:* issueNumber matching is repo-blind — on a multi-repo Projects v2 board, another repo's issue #N can mask a vanished card (fail-safe toward "clean"; single-repo boards, the project's pervasive assumption, are unaffected).
+- **dead-source** (uncertain): candidate in `{candidate, mapped, needs-decision}` whose `source` names a file (the part before `#`) that fails `sourceExists` — only when the source **looks like a path** (contains `/` or ends `.md`/known file shape); non-path sources (`manual`, `reconcile:adopted`) are exempt. **Suppressed for cids already marker-classified above** (otherwise answering the dead-source question about a safe-heal cid would poison the whole apply). Allowed actions `dismiss | keep`.
+- **duplicates** (report-only): a cid carried by ≥2 live items. The lowest-issueNumber item supplies refs for any healing (`kept` names it); the rest are listed in `duplicates[]`. For an already-promoted candidate the `kept` field is informational only — the ledger keeps its own refs.
 - **Boundary cases that classify CLEAN:** promoted candidate whose marker is found (normal); unpromoted candidate with no marker anywhere (normal pre-promotion); a promoted candidate found by issueNumber even if the body lost its marker (edited by a human — issueNumber match is sufficient to count as present).
 
 ### `resolveReconcileDecisions` (fail-closed, M3a idiom)
 
-Unknown candidateId, an action outside the class's allowed set, or a decision targeting a safe-heal/clean item → `errors[]`; the **whole apply is refused** before any ledger write. Undecided uncertain items → `held`. Safe heals are always in `toApply` (no decision needed).
+Unknown candidateId, an action outside the class's allowed set, or a decision targeting a safe-heal/clean/**resume-pending** item → `errors[]`; the **whole apply is refused** before any ledger write. Undecided uncertain items → `held`. Safe heals are always in `toApply` (no decision needed).
 
 ## 5. Apply semantics
 
-All ledger-only; **persist after each item** (resumable, as in promote). Heals are **self-extinguishing**: a settled crash-orphan is `promoted` → no longer flagged; an adopted unknown-marker now has a candidate → clean; a re-promoted vanished card is `mapped` → leaves the bucket (and rejoins promote's pipeline, where its re-created issue gets the same cid marker); a dismissed dead-source is settled. Re-running `scan` after `apply` → clean report; re-running `apply` → no-op. Only `keep` items intentionally resurface.
+All ledger-only; **persist after each item** (resumable, as in promote). `--staged` is **refused** with a pointer to `reconcile scan` (which IS the preview — apply takes no other write mode). Heals are **self-extinguishing**: a settled crash-orphan is `promoted` → no longer flagged; an adopted unknown-marker now has a candidate → clean; a re-promoted vanished card is `mapped` → leaves the bucket (and rejoins promote's pipeline, where its re-created issue gets the same cid marker); a dismissed dead-source is settled. Resume-pending items extinguish via **promote**, not reconcile: `promote apply` finishes their chain and settles them. Re-running `scan` after `apply` → clean except resume-pending/kept items; re-running `apply` → no-op. Only `keep` and resume-pending items intentionally resurface (the former until decided otherwise, the latter until promote finishes).
 
 ## 6. Error handling
 
@@ -102,25 +117,26 @@ All ledger-only; **persist after each item** (resumable, as in promote). Heals a
 
 1. **Pure unit (`lib/reconcile.mjs`, no I/O):** every bucket incl. boundaries (promoted+marker → clean; unpromoted+no-marker → clean; marker-lost-but-issueNumber-present → clean; promoted candidate whose marker sits on an item with a *different* issueNumber than its recorded refs → clean — marker presence wins, stale-ref correction is YAGNI); `resolveReconcileDecisions` fail-closed paths (unknown cid, illegal action per class, decision targeting safe-heal); dead-source only for path-like sources; duplicates ordering (lowest issueNumber wins).
 2. **Verb tests (mock engine whose `listItemsWithBodies` returns marker-bearing bodies):** scan is read-only (zero ledger writes); apply heals the safe set with per-item persistence; decisions flow incl. held; report shape; loud failure when the engine read throws.
-3. **Cross-module integration (the M3a/M3b lesson — real chain, no boundary fixtures):** `syncRecord` → `applyProposals` → `promoteApply` (mock engine) produces real marker bodies → simulate the crash window by reverting the candidate's status and dropping `promotion` → `classifyDrift` catches it → `reconcileApply` heals → re-scan clean. Also: real `promoteApply` output → delete the item from the mock board → vanished detected → `re-promote` decision → candidate back to `mapped` → real `promote apply` re-creates with the same cid.
+3. **Cross-module integration (the M3a/M3b lesson — real chain, no boundary fixtures):** `syncRecord` → `applyProposals` → `promoteApply` (mock engine) produces real marker bodies → then simulate ONLY **reachable** states: (a) the real crash window — status reverted, **refs kept** (an on-board item implies refs were persisted) → `resume-pending` reported, reconcile leaves it, the REAL `promote apply` resumes without creating a second issue and settles → clean; (b) the refs-lost state (ledger restore/hand-edit — status reverted AND refs dropped) → `crash-orphan` → `reconcileApply` settles → clean. Also: real `promoteApply` output → delete the item from the mock board → vanished detected → `re-promote` decision → candidate back to `mapped` → real `promote apply` re-creates with the same cid. *(The first draft of this test hand-built the refs-dropped state as "the crash window" — an unreachable state that masked the resume-foreclosure bug. Simulated states must be reachable by the real upstream's persist ordering.)*
 4. **Gated live smoke (`GBS_LIVE=1`, operator-only):** `listItemsWithBodies` against a real board (the only new live surface). **Never executed in automated/subagent runs. The directive must reach implementer, spec-reviewer, quality-reviewer, AND fixer roles, and the plan marks the live step non-executable.**
 
 ## 8. The decisions file
 
 ```jsonc
 {
-  "<candidateId>": { "action": "re-promote" }   // vanished:    re-promote | dismiss | keep
-  // "<candidateId>": { "action": "dismiss" }   // dead-source: dismiss | keep
+  "<candidateId>": { "action": "re-promote" }   // vanished:           re-promote | dismiss | keep
+  // "<candidateId>": { "action": "dismiss" }   // dead-source:        dismiss | keep
+  // "<candidateId>": { "action": "settle" }    // dismissed-but-live: settle | keep
 }
 ```
 
-No lane/owner overrides here (unlike promote's) — a `re-promote` re-enters the normal promote pipeline where lane/owner already live on the mapped candidate.
+No lane/owner overrides here (unlike promote's) — a `re-promote` re-enters the normal promote pipeline where lane/owner already live on the mapped candidate. Decisions naming a safe-heal or **resume-pending** item are refused.
 
-## 9. Open questions (resolve/verify at plan time)
+## 9. Open questions — **resolved in implementation**
 
-- **GraphQL body fetch:** confirm whether `board.mjs`'s existing `listItems` GraphQL query can simply add `body` to its issue content fragment (preferred: one op, optional field) or whether a separate `listItemsWithBodies` query/op is cleaner. Decide against the real query shape in board.mjs; the DI contract above is the spec either way.
-- **`issueUrl` derivation for adopted refs:** the live item gives issueNumber/itemId; confirm whether the existing query returns the issue URL (promote's resume guards key on `issueNumber`/`itemId`, so `issueUrl` may be null-able in adopted refs — verify nothing downstream requires it).
-- **`appendCandidate` explicit-id path:** confirm it accepts `status`/`promotion` fields on insert or whether the adopt heal writes the candidate then patches it (one write preferred).
+- **GraphQL body fetch:** ~~separate op vs optional field~~ — resolved: `listItems(cfg, {withBodies})` adds `body url` to the existing Issue fragment conditionally; the DI adapter exposes `listItemsWithBodies()` as a thin wrapper. The default `listItems` path is byte-identical to before.
+- **`issueUrl` derivation:** ~~does the query return it~~ — resolved: `Issue.url` is fetched under `withBodies`; adopted refs carry it (nullable — promote's resume guards key on `issueNumber`/`itemId` only).
+- **`appendCandidate` explicit-id path:** ~~accepts status/promotion?~~ — resolved: it does NOT (hardcodes `status:'candidate'`, drops `promotion`), so the adopt heal writes the candidate object directly inside `reconcileApply` (one write).
 
 ## 10. Module context
 
