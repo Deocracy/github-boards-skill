@@ -32,7 +32,7 @@ import { classify, resolveDecisions, cidMarker } from './lib/promote.mjs';
 import { PROFILES } from './lib/profiles.mjs';
 import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction, WATCH_GLOB_RE } from './lib/sources.mjs';
 import { classifyDrift, resolveReconcileDecisions } from './lib/reconcile.mjs';
-import { writeSnapshot, listSnapshots, readSnapshot, readLog, diffSnapshots, resolveKeep } from './lib/snapshots.mjs';
+import { writeSnapshot, listSnapshots, readSnapshot, readLog, diffSnapshots, invertDiff, resolveKeep } from './lib/snapshots.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -1021,6 +1021,44 @@ export async function snapshotLog(n, ctx) {
     ? `${entries.length} event(s)${skippedLines ? ` (${skippedLines} corrupted line(s) skipped)` : ''}.`
     : 'No events recorded yet.';
   return { entries, skippedLines, say };
+}
+
+/**
+ * snapshotInvert(refA, refB, ctx) — the undo plan: diff two points (refB null
+ * -> live board, one listItems read) and invert it into executable ops + a
+ * manual list. Read-only: PROPOSES; execution is the user-approved move/route
+ * verbs (see references/undo-contract.md).
+ * @param {string} refA
+ * @param {string|null} refB
+ * @param {object} ctx { engine, config, dir }
+ * @returns {Promise<{ops:object[], manual:object[], say:string}>}
+ */
+export async function snapshotInvert(refA, refB, ctx) {
+  const dir = ctx.dir || process.cwd();
+  const a = await readSnapshot(dir, refA);
+  let bItems;
+  let bName;
+  if (refB) {
+    const b = await readSnapshot(dir, refB);
+    bItems = b.items;
+    bName = b.takenAt;
+  } else {
+    const { items } = await ctx.engine.listItems();
+    bItems = items || [];
+    bName = 'live board';
+  }
+  const inv = invertDiff(diffSnapshots(a.items, bItems), (ctx.config && ctx.config.routing) || null);
+  const moves = inv.ops.filter((o) => o.op === 'move').length;
+  const routes = inv.ops.filter((o) => o.op === 'route').length;
+  let say;
+  if (inv.ops.length === 0 && inv.manual.length === 0) {
+    say = `Nothing to undo between ${a.takenAt} and ${bName}.`;
+  } else if (inv.ops.length === 0) {
+    say = `No executable undo ops vs ${a.takenAt} — ${inv.manual.length} item(s) need manual attention.`;
+  } else {
+    say = `Undo plan vs ${a.takenAt} (vs ${bName}): ${inv.ops.length} op(s) (${moves} move(s), ${routes} reroute(s)); ${inv.manual.length} manual item(s). Execute via move/route after approval.`;
+  }
+  return { ops: inv.ops, manual: inv.manual, say };
 }
 
 /**

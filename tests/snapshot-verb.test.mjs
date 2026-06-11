@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
-import { summary, snapshotTake, snapshotList, snapshotDiff, snapshotLog } from '../scripts/board-manager.mjs';
+import { summary, snapshotTake, snapshotList, snapshotDiff, snapshotLog, snapshotInvert } from '../scripts/board-manager.mjs';
 import { writeSnapshot, listSnapshots } from '../scripts/lib/snapshots.mjs';
 import { makeMockEngine } from './helpers/mock-engine.mjs';
 
@@ -104,4 +104,49 @@ test('snapshotLog: renders the last N events newest-first; empty case says so', 
   assert.equal(r.entries.length, 2);
   assert.equal(r.entries[0].moved.length, 1); // newest first
   assert.match(r.say, /2 event/);
+});
+
+test('snapshotInvert: ref vs live — proposes the inverse move; READ-ONLY (no write ops on engine)', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [boardItem(1)], {}); // Ideas
+  const engine = engineWith([boardItem(1, { stageLabel: 'Building' })]); // live: moved
+  const r = await snapshotInvert('latest', null, { engine, config: CFG, dir });
+  assert.deepEqual(r.ops, [{ op: 'move', itemId: 'it-1', issueNumber: 1, title: 'Card 1', to: 'Ideas' }]);
+  assert.deepEqual(r.manual, []);
+  assert.match(r.say, /1 op/);
+  const writeOps = engine.calls.filter((c) => ['createIssue', 'setStage', 'setLabels', 'removeLabels', 'addIssueToBoard', 'comment'].includes(c.op));
+  assert.deepEqual(writeOps, [], 'snapshot invert must never write');
+});
+
+test('snapshotInvert: owner flip -> route op; non-owner label change -> manual', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [boardItem(1), boardItem(2)], {});
+  const engine = engineWith([
+    boardItem(1, { labels: ['agent:go'] }),            // pure owner flip human->agent
+    boardItem(2, { labels: ['needs-claude', 'bug'] }), // gained a non-owner label
+  ]);
+  const r = await snapshotInvert('latest', null, { engine, config: CFG, dir });
+  assert.deepEqual(r.ops, [{ op: 'route', itemId: 'it-1', issueNumber: 1, title: 'Card 1', to: 'human' }]);
+  assert.equal(r.manual.length, 1);
+  assert.match(r.manual[0].reason, /no generic relabel verb/);
+});
+
+test('snapshotInvert: identical refs -> nothing to undo', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [boardItem(1)], {});
+  const r = await snapshotInvert('latest', 'latest', { engine: engineWith([]), config: CFG, dir });
+  assert.deepEqual(r.ops, []);
+  assert.deepEqual(r.manual, []);
+  assert.match(r.say, /nothing to undo/i);
+});
+
+test('snapshotInvert: added card lands in manual — never deletable; say points at the manual list', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [boardItem(1)], {});
+  await writeSnapshot(dir, [boardItem(1), boardItem(2)], {});
+  const r = await snapshotInvert('~2', '~1', { engine: engineWith([]), config: CFG, dir });
+  assert.equal(r.ops.length, 0);
+  assert.equal(r.manual.length, 1);
+  assert.match(r.manual[0].reason, /never auto-deleted/);
+  assert.match(r.say, /manual/i);
 });
