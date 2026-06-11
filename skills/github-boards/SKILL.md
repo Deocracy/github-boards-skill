@@ -37,13 +37,13 @@ Direct verbs (`put`, `move`, `route`, …) act on the board immediately. The pip
 | User intent | Verb | Notes |
 |---|---|---|
 | "Put this/these on the board" | `put` | Files real Issues → adds to board → sets starting lane + owner label |
-| "What do I need to do?" | `queue --owner human` | The 🧍 cards (`needs-claude`) |
-| "What is Claude working on?" | `queue --owner agent` | The 🤖 cards (`agent:go`) |
+| "What do I need to do?" | `queue human` | The 🧍 cards (`needs-claude`) |
+| "What is Claude working on?" | `queue agent` | The 🤖 cards (`agent:go`) |
 | "Move card X to Review" | `move` | Sets the `Stage` field |
 | "This needs me" / "Hand to Claude" | `route` | Flips the owner label; on 🧍 keeps the card claimed and @-mentions the human |
 | "Reject, keep the learnings" | `reject` | `reject <card#> "<learnings>"` — moves to *Rejected (learnings kept)* + records a note |
 | "Claude found more work" | `followup` | Files a child/sub-issue back onto the board |
-| "Set up / adjust the lanes" | `reshape` | Sets `Stage` options to the preset's columns + prints the UI-only view checklist |
+| "Set up / adjust the lanes" | `reshape` | Diffs the board's `Stage` options vs the preset and prints the do-it-yourself checklist (read-only) |
 | "What changed / show the board" | `summary` | Diffs vs. last-seen state and reports |
 | "Set up a board from this repo" | `bootstrap` | One-time provisioning: project, Stage field, labels — from the current repo |
 | "Note this for the board later" | `ledger` | Show or append raw intent candidates (the pipeline's inbox) |
@@ -60,14 +60,14 @@ Direct verbs (`put`, `move`, `route`, …) act on the board immediately. The pip
 
 This plugin's hooks feed you board context without being asked:
 
-- **Session start:** a board digest (what changed since the last look) is injected automatically — do not re-run `summary` at the start of a session just to orient; it already ran.
+- **Session start:** when `board.json` is configured, a board digest (what changed since the last look) is injected automatically — if a digest appeared, don't re-run `summary` to orient; it already ran.
 - **While editing:** when a watched source file (`board.json` → `sources.watch`) changes, a one-line note appears once per file per session. That is the cue to OFFER `sync scan` — not to run the pipeline silently.
 
 ## The undo reflex
 
 When the user asks to undo or roll back board changes ("undo what happened since this morning", "put it back how it was"):
 
-1. Run `snapshot invert <ref>` — it prints the inverse plan: `ops` (executable) and `manual` (never auto-executed).
+1. Run `snapshot list` and pin an explicit anchor (a stamp or `~N`) — `latest` is usually the snapshot the session-start hook just took *after* the changes. Then `snapshot invert <anchor>` prints the inverse plan: `ops` (executable) and `manual` (never auto-executed).
 2. Show both lists to the user; on approval execute `ops` one by one via `move`/`route`.
 3. Report back what was restored and what remains manual. Full contract: `references/undo-contract.md`.
 
@@ -82,7 +82,7 @@ When the user asks to undo or roll back board changes ("undo what happened since
 
 ## Routing (🤖 vs 🧍)
 
-Marked by labels already understood by the board: `agent:go` = Claude-actionable, `needs-claude` = human-actionable. `route` flips them; `queue --owner …` filters them. The two "plates" are just two filtered views over the one board.
+Marked by labels already understood by the board: `agent:go` = Claude-actionable, `needs-claude` = human-actionable. `route` flips them; `queue <agent|human>` filters them. The two "plates" are just two filtered views over the one board.
 
 ## Configuration
 
