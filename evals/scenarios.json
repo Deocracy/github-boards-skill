@@ -13,6 +13,9 @@
   { "id": "reconcile-1",    "say": "I think the ledger is out of sync with the board — heal it",     "expectVerb": "reconcile" },
   { "id": "snapshot-hist",  "say": "what did the board look like before yesterday's cleanup?",       "expectVerb": "snapshot" },
   { "id": "undo-1",         "say": "undo everything that happened on the board since this morning",  "expectVerb": "snapshot", "expectArgs": "invert" },
+  { "id": "reshape-1",      "say": "set up the lanes from the build preset",                          "expectVerb": "reshape" },
+  { "id": "bootstrap-1",    "say": "set up a fresh kanban board for this repo",                       "expectVerb": "bootstrap" },
+  { "id": "ledger-1",       "say": "note this for the board later: investigate flaky CI",            "expectVerb": "ledger" },
   { "id": "neg-code-move",  "say": "move this function into utils.mjs",                              "expectVerb": null },
   { "id": "neg-screenshot", "say": "take a screenshot of the homepage",                              "expectVerb": null },
   { "id": "neg-gpu",        "say": "what's the best graphics card for gaming?",                      "expectVerb": null }

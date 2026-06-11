@@ -47,8 +47,9 @@ for (const s of scenarios) {
     shell: process.platform === 'win32', // .cmd shim
     timeout: 120000,
   });
-  if (r.error || r.status === null) {
-    console.error(`eval-skill: failed to run the claude CLI (${r.error ? r.error.message : 'timeout'}) — is it installed and on PATH?`);
+  const infraFailure = r.error || r.status === null || (r.status !== 0 && !(r.stdout || '').trim());
+  if (infraFailure) {
+    console.error(`eval-skill: failed to run the claude CLI (${r.error ? r.error.message : `exit ${r.status}, no output`}) — is it installed and on PATH?`);
     process.exit(1);
   }
   let got = '(unparseable)';
