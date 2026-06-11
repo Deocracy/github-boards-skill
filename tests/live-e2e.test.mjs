@@ -45,7 +45,7 @@ test(
     let verbCfg;     // verb-level config (loadConfig from lib/config.mjs)
     const engine = {
       listItems: () => eng.listItems(loadedCfg),
-      listItemsWithBodies: () => eng.listItemsWithBodies(loadedCfg),
+      listItemsWithBodies: () => eng.listItems(loadedCfg, { withBodies: true }),
       getStageField: () => eng.getStageField(loadedCfg),
       createIssue: (t, b, opts = {}) => {
         const f = flagsFor(opts);
