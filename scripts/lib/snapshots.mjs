@@ -197,6 +197,57 @@ export async function writeSnapshot(dir, items, { label = null, keep = DEFAULT_K
 }
 
 /**
+ * PURE ref resolution over a newest-first listSnapshots() array.
+ * Refs: 'latest' (or null) · '~N' 1-based age index · ISO-stamp prefix
+ * ('2026-06-10' -> that day's newest; ':'/'.' forms accepted — normalized to
+ * the filename's '-' form). Unresolvable -> legible error with nearest stamps.
+ * @param {{file:string}[]} snaps  newest-first
+ * @param {string|null} ref
+ * @returns {{file:string}} the matching entry
+ */
+export function resolveRef(snaps, ref) {
+  if (!snaps || snaps.length === 0) {
+    throw new Error('snapshot: no snapshots exist yet — run summary or `snapshot take` first.');
+  }
+  if (ref == null || ref === 'latest') return snaps[0];
+
+  const ageMatch = /^~(\d+)$/.exec(ref);
+  if (ageMatch) {
+    const n = Number(ageMatch[1]);
+    if (n < 1 || n > snaps.length) {
+      throw new Error(`snapshot: ~${n} out of range (1..${snaps.length}).`);
+    }
+    return snaps[n - 1];
+  }
+
+  const norm = String(ref).replace(/[:.]/g, '-');
+  const hits = snaps.filter((s) => s.file.startsWith(`snapshot-${norm}`));
+  if (hits.length) return hits[0]; // newest matching the prefix
+
+  const nearest = snaps.slice(0, 3).map((s) => s.file).join(', ');
+  throw new Error(`snapshot: no snapshot matches '${ref}'. Nearest: ${nearest}`);
+}
+
+/**
+ * Resolve a ref and read the full snapshot. Malformed JSON errors loudly,
+ * NAMING the file — corrupted history must be visible, not skipped.
+ * @param {string} dir
+ * @param {string|null} ref
+ * @returns {Promise<object>} the snapshot {takenAt, label, count, itemsHash, items}
+ */
+export async function readSnapshot(dir, ref) {
+  const snaps = await listSnapshots(dir);
+  const hit = resolveRef(snaps, ref);
+  const p = join(snapDir(dir), hit.file);
+  const raw = await readFile(p, 'utf8');
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`snapshot: ${hit.file} is corrupted (${e.message}).`);
+  }
+}
+
+/**
  * Read the event log, newest-first, capped at n. Malformed lines (torn writes)
  * are skipped and counted — one bad line must not orphan the journal.
  * Missing log -> empty.

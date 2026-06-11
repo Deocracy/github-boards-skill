@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
-import { diffSnapshots, stampFor, resolveKeep, writeSnapshot, listSnapshots, readLog } from '../scripts/lib/snapshots.mjs';
+import { diffSnapshots, stampFor, resolveKeep, writeSnapshot, listSnapshots, readLog, resolveRef, readSnapshot } from '../scripts/lib/snapshots.mjs';
 
 const tmp = () => mkdtempSync(join(os.tmpdir(), 'gbs-snap-'));
 
@@ -188,4 +188,38 @@ test('listSnapshots: corrupt snapshot file listed as (unreadable), never hidden'
   assert.equal(list[0].label, '(unreadable)');
   assert.equal(list[0].takenAt, null);
   assert.equal(list[1].label, 'good');
+});
+
+test('resolveRef: latest / ~N / date-prefix; legible errors otherwise', () => {
+  const snaps = [
+    { file: 'snapshot-2026-06-10T14-00-00-000Z.json', takenAt: '2026-06-10T14:00:00.000Z', label: null, count: 1 },
+    { file: 'snapshot-2026-06-10T09-00-00-000Z.json', takenAt: '2026-06-10T09:00:00.000Z', label: 'morning', count: 1 },
+    { file: 'snapshot-2026-06-09T18-00-00-000Z.json', takenAt: '2026-06-09T18:00:00.000Z', label: null, count: 1 },
+  ];
+  assert.equal(resolveRef(snaps, 'latest').file, snaps[0].file);
+  assert.equal(resolveRef(snaps, null).file, snaps[0].file);
+  assert.equal(resolveRef(snaps, '~1').file, snaps[0].file);
+  assert.equal(resolveRef(snaps, '~3').file, snaps[2].file);
+  assert.equal(resolveRef(snaps, '2026-06-09').file, snaps[2].file);     // that day's newest
+  assert.equal(resolveRef(snaps, '2026-06-10').file, snaps[0].file);     // newest of two
+  assert.equal(resolveRef(snaps, '2026-06-10T09').file, snaps[1].file);  // longer prefix narrows
+  assert.equal(resolveRef(snaps, '2026-06-10T09:00').file, snaps[1].file); // ':' form accepted
+  assert.throws(() => resolveRef(snaps, '~4'), /out of range \(1\.\.3\)/);
+  assert.throws(() => resolveRef(snaps, '~0'), /out of range/);
+  assert.throws(() => resolveRef(snaps, '2030-01-01'), /no snapshot matches/);
+  assert.throws(() => resolveRef([], 'latest'), /no snapshots exist yet/);
+});
+
+test('readSnapshot: resolves a ref and returns the full snapshot; malformed file errors NAMING the file', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [item(1)], { label: 'good' });
+  const snap = await readSnapshot(dir, 'latest');
+  assert.equal(snap.label, 'good');
+  assert.equal(snap.items.length, 1);
+
+  // corrupt it
+  const list = await listSnapshots(dir);
+  const p = join(dir, '.github-boards', 'snapshots', list[0].file);
+  writeFileSync(p, '{not json', 'utf8');
+  await assert.rejects(() => readSnapshot(dir, 'latest'), new RegExp(list[0].file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
