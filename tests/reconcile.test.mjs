@@ -64,7 +64,7 @@ test('DISMISSED-BUT-LIVE: dismissed candidate with a live marker -> uncertain qu
   assert.match(u.question, /dismissed/);
 });
 
-test('CRASH-ORPHAN: merged/split statuses with a live marker also settle (any non-promoted status)', () => {
+test('CRASH-ORPHAN: merged/split statuses with a live marker also settle (non-promoted, non-dismissed, refs absent)', () => {
   for (const status of ['merged', 'split']) {
     const d = classifyDrift({
       ledger: { candidates: [cand(CID_A, { status })] },

@@ -20,7 +20,7 @@ Three stores can drift apart: **source files**, the **ledger**, and the **live b
 - **`engine.listItemsWithBodies()`** — one new read op in `board.mjs` + the DI contract.
 - **`reconcile scan` / `reconcile apply [--decisions <file>]`** verbs in `board-manager.mjs` + CLI.
 - The reconcile **decisions-file schema** (same idiom as promote's).
-- Four drift classes: crash-orphan, unknown-marker (safe heals); vanished, dead-source (needs-decision).
+- Six drift classes: crash-orphan, unknown-marker (safe heals); vanished, dead-source, dismissed-but-live (needs-decision); resume-pending (report-only — promote's job).
 - `duplicates[]` **report-only** bucket (two live issues bearing the same cid).
 - Deterministic unit + cross-module integration tests; one gated (`GBS_LIVE=1`, operator-only) live smoke for the new read op.
 
@@ -80,8 +80,8 @@ New code is **bold**. Same pure-module + injectable-engine pattern as M1–M3.
 
 | Unit | Responsibility | Interface |
 |---|---|---|
-| **`lib/reconcile.mjs`** | Pure classification + decision resolution. No fs, no network — board items, ledger, and an existence-probe are passed in. | `classifyDrift({ledger, items, sourceExists})` → `{safeHeals[], uncertain[], duplicates[], clean:boolean}` · `resolveReconcileDecisions(drift, decisions)` → `{toApply[], held[], errors[]}` |
-| **`engine.listItemsWithBodies()`** (`board.mjs` + DI contract in board-manager's header) | Board items including each issue's **body**. Read-only — no stagedGuard. | → `{ items: [{itemId, issueNumber, title, stageLabel, labels[], body}], count }` |
+| **`lib/reconcile.mjs`** | Pure classification + decision resolution. No fs, no network — board items, ledger, and an existence-probe are passed in. | `classifyDrift({ledger, items, sourceExists})` → `{safeHeals[], resumePending[], uncertain[], duplicates[], clean:boolean}` · `resolveReconcileDecisions(drift, decisions)` → `{toApply[], held[], errors[]}` |
+| **`engine.listItemsWithBodies()`** (`board.mjs` + DI contract in board-manager's header) | Board items including each issue's **body**. Read-only — no stagedGuard. | → `{ items: [{itemId, issueNumber, title, stageLabel, labels[], body, issueUrl}], count }` |
 | **`board-manager.mjs` verbs** | `reconcileScan(ctx)` read-only compose; `reconcileApply(decisions, ctx)` fail-closed ledger-only writes, per-item persist. | `ctx = {engine, config, dir}` |
 | **CLI** | Dispatch + help. Requires a configured board (loadConfig path — unlike `sync`, reconcile is meaningless without one). | `reconcile <scan\|apply> [--decisions <file>]` |
 
