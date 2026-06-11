@@ -23,10 +23,10 @@ Both accumulate as a side effect of normal use, answering "what changed this wee
 ## 2. Scope
 
 ### In scope
-- **`lib/snapshots.mjs`** — the snapshot store: write (dedup + prune), list, read-by-ref, pure `diffSnapshots`, **and the append-only event log** (`appendLogEntry`, `readLog`).
+- **`lib/snapshots.mjs`** — the snapshot store: write (dedup + prune), list, read-by-ref, pure `diffSnapshots`, **and the append-only event log** (`readLog`; the log append is internal to `writeSnapshot`).
 - **`log.jsonl`** — one JSON line per observed change-event, written whenever a non-skipped snapshot lands; **never pruned**.
 - **`summary` piggyback** — non-fatal snapshot+log write after summary's existing work.
-- **`snapshot take ["label"]` / `snapshot list` / `snapshot diff <ref> [<ref2>]` / `snapshot log [N]`** verbs + CLI (loadConfig path).
+- **`snapshot take ["label"]` / `snapshot list` / `snapshot diff [<ref>] [<ref2>]` / `snapshot log [N]`** verbs + CLI. `list` and `log` are Tier-0 (fs-only, no `loadConfig`); `take` and `diff` go through `loadConfig` and honor `--config`.
 - Optional **`snapshots: { keep: 50 }`** config block (raw-tolerant, like `sources`); `board.example.json` documents it.
 - Deterministic unit + verb + cross-module tests. **No new live surface** — the only board read is the long-shipped `listItems`.
 
@@ -57,13 +57,13 @@ summary (existing verb, incl. the session-start hook's run)
    otherwise          → { at, ...diffSnapshots(prevNewest.items, items) }
    (the previous snapshot is already in hand for dedup — the log line is free)
         │
-snapshot take ["label"]       manual save-point (same dedup/prune/log; label optional)
-snapshot list                 newest-first: stamp, label, count, age
-snapshot diff <ref> [<ref2>]  PURE diff; ref2 omitted → fresh engine.listItems()
-                              as "now"
+snapshot take ["label"]       manual save-point (same dedup/prune/log; label optional) — needs loadConfig
+snapshot list                 newest-first: stamp, label, count, age               ← Tier-0 (fs-only, no board.json)
+snapshot diff [<ref>] [<ref2>]  PURE diff; defaults: latest vs live board           — needs loadConfig
+                              ref2 omitted → fresh engine.listItems() as "now"
    → { moved[], added[], removed[], relabeled[], retitled[] }
-snapshot log [N]              last N events (default 20) from log.jsonl,
-                              newest-first, human-readable
+snapshot log [N]              last N events (default 20) from log.jsonl,           ← Tier-0 (fs-only, no board.json)
+                              newest-first, human-readable; N must be a positive integer
 ```
 
 ## 4. Components & interfaces
@@ -73,41 +73,41 @@ New code is **bold**.
 | Unit | Responsibility | Interface |
 |---|---|---|
 | **`lib/snapshots.mjs`** | Snapshot store + event log; owns `.github-boards/snapshots/`. | `writeSnapshot(dir, items, {label?, keep?})` → `{path, skipped:false, logged:boolean}` \| `{skipped:true, reason}` · `listSnapshots(dir)` → `[{file, takenAt, label, count}]` newest-first · `readSnapshot(dir, ref)` → snapshot object · `diffSnapshots(prevItems, currItems)` → diff (pure) · `resolveRef(refs, ref)` (pure ref→file resolution, exported for tests) · `readLog(dir, n)` → `{entries:[…newest-first], skippedLines}` |
-| **`board-manager.mjs`** | `summary` piggyback; `snapshotTake(label, ctx)`, `snapshotList(ctx)`, `snapshotDiff(refA, refB, ctx)`, `snapshotLog(n, ctx)` verbs; CLI `snapshot <take\|list\|diff\|log>`. | `snapshotDiff(refA, refB?, ctx)` — `refB` omitted → live board via `engine.listItems()` |
+| **`board-manager.mjs`** | `summary` piggyback; `snapshotTake(label, ctx)`, `snapshotList(ctx)`, `snapshotDiff(refA, refB, ctx)`, `snapshotLog(n, ctx)` verbs; CLI `snapshot <take\|list\|diff\|log>`. | `snapshotDiff(refA, refB?, ctx)` — `refB` omitted → live board via `engine.listItems()`. CLI dispatch: `list` and `log [N]` are Tier-0 (fs-only, before `loadConfig` — work without `board.json`, like `sync`); `take` and `diff` go through `loadConfig` (need the engine); unknown sub-verbs throw the usage error in Tier-0 so an unconfigured repo never sees a confusing config-not-found error; `snapshot log N` requires a positive integer (loud error on non-integer or ≤0, default 20); `snapshot diff` defaults are `latest` vs live board (documented in `--help`). |
 | **`board.example.json`** | Document `"snapshots": { "keep": 50 }`. | — |
 
 ### Mechanics
 
 - **File format:** `snapshot-2026-06-10T14-30-05-123Z.json`: `{ takenAt (real ISO), label (string|null), count, itemsHash, items[] }` — items exactly as `listItems` returns them (`itemId, contentType, issueNumber, title, state, repo, stageLabel, labels[]`). Filename sorts chronologically by construction; `listSnapshots` = readdir + filter valid names + sort desc. No index file.
-- **Dedup:** normalize items (sorted by itemId, stable key order) → `contentHash` (reused from `lib/sources.mjs`) → compare with newest snapshot's stored `itemsHash`. Equal → `{skipped:true}`, no file. The hash is stored so dedup never has to re-read/re-normalize old files.
-- **Refs:** `latest` · ISO-stamp prefix (`2026-06-10` → that day's newest; longer prefixes narrow further) · `~N` 1-based age index (`~1` = newest). Unresolvable/ambiguous-empty → legible error listing the three nearest stamps.
+- **Dedup:** `writeSnapshot` first collapses any duplicate `itemId`s in the incoming items array (last-wins, matching `diffSnapshots`'s Map semantics), so GraphQL pagination duplicates cannot inflate the hash, the count, or the log diff. Then: normalize items (sorted by itemId, stable key order) → `contentHash` (reused from `lib/sources.mjs`) → compare with newest snapshot's stored `itemsHash`. Equal → `{skipped:true}`, no file. The hash is stored so dedup never has to re-read/re-normalize old files. The hash deliberately excludes `state`, `repo`, and `contentType` — the store tracks lane/label/title history (the asked question); a state-only change (e.g. Issue closed without moving columns) does not create a new snapshot.
+- **Refs:** `latest` · ISO-stamp prefix (`2026-06-10` → that day's newest; longer prefixes narrow further) · `~N` 1-based age index (`~1` = newest). Unresolvable → legible error listing the newest 3 stamps under the word "Recent:".
 - **Diff (pure, keyed by `itemId`):** `moved` `{itemId, issueNumber, title, from, to}` (stageLabel changed) · `relabeled` `{itemId, issueNumber, title, added[], removed[]}` (label SET changed — order-insensitive) · `retitled` `{itemId, issueNumber, from, to}` · `added`/`removed` `{itemId, issueNumber, title}` (one side only). Unchanged items silent. A card can appear in several buckets (moved AND relabeled) — buckets are independent.
 - **Retention:** default 50; `config.snapshots.keep` (positive integer; anything else → default). Prune deletes strictly the valid-snapshot-named files beyond newest-N; **`log.jsonl` is never pruned** and never matches the snapshot-name filter; other foreign files are likewise never touched.
-- **The event log:** written inside `writeSnapshot` only when the write is NOT skipped. First-ever snapshot → `{at, initial:true, count}`; thereafter → `{at, moved, added, removed, relabeled, retitled}` from `diffSnapshots(previousNewest.items, items)` (the previous snapshot is already loaded for dedup — the line is free). Append-only `log.jsonl`; one compact JSON line per event. `readLog(dir, n)` returns the last `n` entries newest-first and **tolerates malformed lines** (a torn write from a crash must not kill the whole journal — bad lines are skipped and counted in `skippedLines`).
-- **Piggyback placement:** inside `summary` after its existing state write, wrapped so failure degrades to a say suffix. The hook needs no change — it calls `summary` and inherits both the snapshot and the tolerance.
+- **The event log:** written inside `writeSnapshot` only when the write is NOT skipped. First-ever snapshot → `{at, initial:true, count}`; thereafter → `{at, moved, added, removed, relabeled, retitled}` from `diffSnapshots(previousNewest.items, items)` (the previous snapshot is already loaded for dedup — the line is free). Append-only `log.jsonl`; one compact JSON line per event. **Journal integrity:** if the log append fails after the snapshot file was written, the orphaned snapshot file is immediately unlinked (compensating rollback) and the append error is rethrown — a snapshot without its log line never survives to poison dedup, and a retry re-records the event. `readLog(dir, n)` returns the last `n` entries newest-first and **tolerates malformed lines** (a torn write from a crash must not kill the whole journal — bad lines are skipped and counted in `skippedLines`).
+- **Piggyback placement:** inside `summary`, wrapping only the snapshot write (after the existing `writeState`/teamSync calls). The try/catch is scoped to `writeSnapshot` alone — pre-existing `writeState` and teamSync failures remain loud and unaffected. The hook needs no change — it calls `summary` and inherits both the snapshot and the tolerance.
 
 ## 5. Error handling
 
 - **Piggyback never breaks `summary`** (and therefore never the session-start hook): all store failures caught → "(snapshot skipped: <reason>)" suffix.
-- **Manual verbs are loud:** unresolvable ref → error listing nearest stamps; malformed snapshot JSON on read → error naming the file (corrupted history must be visible, not skipped); no snapshots yet → `list` says so, `diff latest` errors legibly.
+- **Manual verbs are loud:** unresolvable ref → error listing the newest 3 stamps under "Recent:" (honest wording — these are the nearest by time, not nearest by match); malformed snapshot JSON on read → error naming the file (corrupted history must be visible, not skipped); no snapshots yet → `list` says so, `diff latest` errors legibly.
 - **Empty board** snapshots fine (`count: 0`). Diffing identical refs → empty buckets, say "no changes."
 - **`~N` out of range** → error showing the valid range.
-- **Log robustness:** a failed log append degrades exactly like a failed snapshot write (caught in the piggyback; loud in manual `take`). `snapshot log` with no log yet → "no events recorded yet." Malformed log lines are skipped and reported as a count, never fatal — the log is a journal, and one torn line must not orphan years of history.
+- **Log robustness:** a failed log append in the piggyback is caught like any other store failure. In manual `take` (loud path), a failed append triggers a compensating unlink of the just-written snapshot and rethrows — the orphan never survives, and a retry re-records the event cleanly. `snapshot log` with no log yet → "no events recorded yet." Malformed log lines are skipped and reported as a count, never fatal — the log is a journal, and one torn line must not orphan years of history.
 
 ## 6. Testing
 
 All deterministic — temp dirs, mock engine, no live gate.
 
-1. **`lib/snapshots.mjs` unit:** write→list→read round-trip; dedup (identical items → skipped, no second file, NO log line; changed items → new file + log line); prune (N+3 distinct writes with keep=N → oldest snapshots deleted, **`log.jsonl` survives with all its lines**, foreign file untouched); ref resolution (`latest`, date prefix, `~N`, out-of-range/unknown → legible errors); `diffSnapshots`: each bucket isolated + a combined multi-bucket case + label-order insensitivity + same-items → all empty; log: first write → `initial` line, subsequent → diff lines, `readLog` newest-first + n-cap + malformed-line tolerance (`skippedLines`).
+1. **`lib/snapshots.mjs` unit:** write→list→read round-trip; dedup (identical items → skipped, no second file, NO log line; changed items → new file + log line); prune (N+3 distinct writes with keep=N → oldest snapshots deleted, **`log.jsonl` survives with all its lines**, foreign file untouched); ref resolution (`latest`, date prefix, `~N`, out-of-range/unknown → legible errors); `diffSnapshots`: each bucket isolated + a combined multi-bucket case + label-order insensitivity + same-items → all empty; log: first write → `initial` line, subsequent → diff lines, `readLog` newest-first + n-cap + malformed-line tolerance (`skippedLines`). Also: **torn-append rollback** — placing a directory at `log.jsonl`'s path causes `appendFile` to throw; the test asserts the snapshot file is immediately unlinked (no orphan survives), and a subsequent write succeeds and records the event. **Duplicate-itemId collapse** — feeding `writeSnapshot` an array containing the same `itemId` twice yields `skipped:true` (dup-inflated board equals the previous snapshot), confirming last-wins collapse keeps count and hash honest.
 2. **Verb tests (mock engine):** summary piggyback — one snapshot+log event on changed board, none on unchanged, injected store failure → summary still succeeds with the suffix; `snapshotTake` stores the label; `snapshotDiff` two refs and ref-vs-live; `snapshotLog` renders the last N events; say lines.
 3. **Cross-module reality check (the standing lesson):** snapshots written from real `listItems`-shaped mock-engine data flowing through the existing promote pipeline — diff pre-promote vs post-promote board, assert the promoted card shows in `added` with its real title. No hand-built snapshot fixtures at the boundary.
-4. **Hook tolerance:** the session-start summary path with a sabotaged snapshots dir still injects its note.
+4. **Hook tolerance:** the session-start summary path with a file planted at `.github-boards/snapshots` (the SNAPSHOTS subdirectory path specifically) forces `writeSnapshot`'s `mkdir` to fail, proving `writeState` is completely unaffected and only the piggyback degrades to a "(snapshot skipped: …)" suffix on the say.
 
 ## 7. Open questions (resolve/verify at plan time)
 
-- **`summary`'s current shape:** verify where summary's items are available in its flow (it builds the state map from `listItems` — confirm the raw items array is in scope for the piggyback without a second fetch).
-- **`Date` use:** snapshot stamps need real timestamps (`new Date().toISOString()`), consistent with ledger's `addedAt` — no constraint here, just match house style.
-- **CLI ref quoting:** `~1` on PowerShell — verify `~` needs no escaping when passed as an argv (it doesn't inside quotes; document in help if needed).
+- **`summary`'s current shape:** ✅ resolved — the raw `items` array from `listItems` is in scope after the state write; the piggyback reuses it with no second fetch.
+- **`Date` use:** ✅ resolved — `stampFor` wraps `new Date().toISOString()` with `:` and `.` → `-`; consistent with house style.
+- **CLI ref quoting:** ✅ resolved — `~1` needs no escaping when passed as an argv; the `--help` line for `snapshot diff` documents the defaults (latest vs live board).
 
 ## 8. The undo story (for the record)
 
