@@ -16,15 +16,51 @@ A `board.json` binds the skill to your board. Run `doctor` to discover the IDs.
     "Shipped":  "…optionId"
   },
   "preset":   "build",                    // or "grants" — selects the lane shape template
-  "routing":  { "agent": "agent:go", "human": "needs-claude" }  // 🤖/🧍 labels (optional, these are the defaults)
+  "routing":  { "agent": "agent:go", "human": "needs-claude" },  // 🤖/🧍 labels (optional, these are the defaults)
+  "pushPolicy":    "on-approval",         // writes only happen after explicit user OK
+  "pullCadence":   "session-start",       // when to pull a fresh board digest
+  "sources": {
+    "watch":   [],                        // glob patterns for source files to watch (sync + PostToolUse)
+    "disable": []                         // patterns to exclude from scanning
+  },
+  "snapshots": {
+    "keep": 50                            // how many pruned save-points to retain (log.jsonl is never pruned)
+  },
+  "rules": {
+    "maxLanes":                8,
+    "defaultOwner":            "human",
+    "granularity":             "fine",
+    "escalateConfidenceBelow": 0.6,
+    "escalateBatchOver":       12,
+    "promoteConfidenceBelow":  0.8
+  }
 }
 ```
+
+## Key sections
+
+### `sources`
+
+Controls the `sync` verb and the PostToolUse real-time hook.
+
+- **`watch`** — glob patterns for source files the skill tracks (e.g. `["TODO.md", "docs/plans/**/*.md"]`). When any watched file changes mid-session, a one-line note appears as the cue to offer `sync scan`.
+- **`disable`** — patterns to exclude from scanning (e.g. `["node_modules/**"]`).
+
+### `snapshots`
+
+Controls the `snapshot` family.
+
+- **`keep`** — how many pruned full-board save-points to retain. The permanent event log (`log.jsonl`) is **never** pruned regardless of this setting.
+
+### `stageOptions` and `preset`
+
+`stageOptions` maps each lane name to its GitHub option ID. `preset` names the lane-shape template (`build` or `grants`) used by `reshape` and `doctor`. The IDs are board-specific and discovered by `doctor` — never hand-copy them.
 
 ## Lane presets (project-agnostic formats)
 
 Lanes are **read from a preset**, so board formats are reusable across projects with no code change. A preset is a lane-shape *template* stored as data in [`presets/`](../presets); `board.json` just names which one a board uses (`"preset": "grants"`), and `doctor` binds the preset's lane names to that board's live option IDs.
 
-Bundled examples:
+Bundled presets:
 
 - **build** (software): Ideas → Researching → Building → Review → Shipped → Rejected (learnings kept)
 - **grants / paperwork** (`kind: non-software`): Intake → Drafting → Needs-info → Ready-to-submit → Submitted → Awaiting-decision → Awarded / Rejected

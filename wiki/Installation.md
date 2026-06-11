@@ -10,7 +10,7 @@
 
 ## Install (plugin)
 
-```
+```text
 /plugin marketplace add deocracy/github-boards-skill
 /plugin install github-boards@github-boards-skill
 ```
@@ -31,4 +31,10 @@ No token can create or group a board *view* — that's browser-only. Once per bo
 
 Run the skill's `doctor` afterwards — it prints this checklist and flags anything missing, then discovers the IDs for [Configuration](Configuration).
 
-> Final org/repo slug is TBD before first publish — see [Roadmap](Roadmap).
+## Verify the install
+
+```text
+node "<skill-dir>/scripts/board.mjs" doctor
+```
+
+`doctor` checks your `gh` auth, Node version, project/field IDs, and prints the one-time human board-setup checklist. Fix anything it flags before running verbs.
