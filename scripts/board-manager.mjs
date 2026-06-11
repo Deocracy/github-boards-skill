@@ -1216,7 +1216,7 @@ async function cli() {
   reconcile apply [--decisions <file>]  heal drift — ledger-only writes (board untouched)
   snapshot take ["label"]               manual board save-point (dedup'd)
   snapshot list                         stored snapshots, newest first
-  snapshot diff <ref> [<ref2>]          what changed between two points (ref2 omitted = live board)
+  snapshot diff [<ref>] [<ref2>]        what changed between two points (defaults: latest vs live board)
   snapshot log [N]                      the permanent event journal (default last 20)
 
   --staged          preview every write; nothing is committed
@@ -1298,7 +1298,9 @@ async function cli() {
       return;
     }
     if (sub === 'log') {
-      const r = await snapshotLog(rest[1] ? Number(rest[1]) : 20, { dir: process.cwd() });
+      const n = rest[1] ? Number(rest[1]) : 20;
+      if (Number.isNaN(n)) throw new Error(`snapshot log: '${rest[1]}' is not a number.`);
+      const r = await snapshotLog(n, { dir: process.cwd() });
       console.log(r.say);
       console.log(JSON.stringify(r.entries, null, 2));
       return;
@@ -1450,7 +1452,9 @@ async function cli() {
         return;
       }
       if (sub === 'log') {
-        const r = await snapshotLog(rest[1] ? Number(rest[1]) : 20, { dir: process.cwd() });
+        const n = rest[1] ? Number(rest[1]) : 20;
+        if (Number.isNaN(n)) throw new Error(`snapshot log: '${rest[1]}' is not a number.`);
+        const r = await snapshotLog(n, { dir: process.cwd() });
         console.log(r.say);
         console.log(JSON.stringify(r.entries, null, 2));
         return;
