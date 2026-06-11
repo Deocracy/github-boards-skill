@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
-import { diffSnapshots, stampFor, resolveKeep } from '../scripts/lib/snapshots.mjs';
+import { diffSnapshots, stampFor, resolveKeep, writeSnapshot, listSnapshots, readLog } from '../scripts/lib/snapshots.mjs';
 
 const tmp = () => mkdtempSync(join(os.tmpdir(), 'gbs-snap-'));
 
@@ -69,4 +69,97 @@ test('resolveKeep: positive integer honored; everything else -> 50', () => {
   assert.equal(resolveKeep({ snapshots: { keep: 'lots' } }), 50);
   assert.equal(resolveKeep({}), 50);
   assert.equal(resolveKeep(null), 50);
+});
+
+test('writeSnapshot: round-trip — file written, listSnapshots reads it back newest-first', async () => {
+  const dir = tmp();
+  const r1 = await writeSnapshot(dir, [item(1)], {});
+  assert.equal(r1.skipped, false);
+  assert.equal(r1.logged, true);
+  const r2 = await writeSnapshot(dir, [item(1), item(2)], { label: 'two cards' });
+  assert.equal(r2.skipped, false);
+  const list = await listSnapshots(dir);
+  assert.equal(list.length, 2);
+  assert.equal(list[0].label, 'two cards'); // newest first
+  assert.equal(list[0].count, 2);
+  assert.equal(list[1].label, null);
+});
+
+test('writeSnapshot: DEDUP — identical board skips (no file, no log line)', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [item(1)], {});
+  const filesBefore = readdirSync(join(dir, '.github-boards', 'snapshots'));
+  const r = await writeSnapshot(dir, [item(1)], {});
+  assert.equal(r.skipped, true);
+  assert.match(r.reason, /unchanged/);
+  const filesAfter = readdirSync(join(dir, '.github-boards', 'snapshots'));
+  assert.deepEqual(filesAfter, filesBefore);
+});
+
+test('writeSnapshot: dedup is label-order-insensitive (same board, shuffled labels -> skip)', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [item(1, { labels: ['a', 'b'] })], {});
+  const r = await writeSnapshot(dir, [item(1, { labels: ['b', 'a'] })], {});
+  assert.equal(r.skipped, true);
+});
+
+test('writeSnapshot: same-millisecond writes get distinct filenames (1ms bump), takenAt matches the stamp', async () => {
+  const dir = tmp();
+  // distinct boards in a tight loop — filename collisions WILL happen without the bump
+  for (let i = 1; i <= 5; i++) {
+    const r = await writeSnapshot(dir, [item(i)], {});
+    assert.equal(r.skipped, false);
+  }
+  const list = await listSnapshots(dir);
+  assert.equal(list.length, 5);
+  const files = list.map((s) => s.file);
+  assert.equal(new Set(files).size, 5, 'filenames must be unique');
+  // takenAt mirrors the (possibly bumped) stamp: file order === takenAt order
+  const taken = list.map((s) => s.takenAt);
+  assert.deepEqual([...taken].sort().reverse(), taken);
+});
+
+test('writeSnapshot: PRUNE to keep — oldest snapshot files deleted; log.jsonl and foreign files survive', async () => {
+  const dir = tmp();
+  for (let i = 1; i <= 6; i++) await writeSnapshot(dir, [item(i)], { keep: 3 });
+  const snapdir = join(dir, '.github-boards', 'snapshots');
+  writeFileSync(join(snapdir, 'foreign.txt'), 'mine', 'utf8');
+  await writeSnapshot(dir, [item(99)], { keep: 3 });
+  const list = await listSnapshots(dir);
+  assert.equal(list.length, 3);
+  assert.ok(existsSync(join(snapdir, 'foreign.txt')), 'foreign files never touched');
+  assert.ok(existsSync(join(snapdir, 'log.jsonl')), 'log is never pruned');
+  // log has all 7 events even though only 3 snapshots remain
+  const { entries } = await readLog(dir, 100);
+  assert.equal(entries.length, 7);
+});
+
+test('event log: first write -> initial line; subsequent -> diff lines, newest-first via readLog', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [item(1)], {});
+  await writeSnapshot(dir, [item(1, { stageLabel: 'Building' })], {});
+  const { entries, skippedLines } = await readLog(dir, 10);
+  assert.equal(skippedLines, 0);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[1].initial, true);            // oldest = initial baseline
+  assert.equal(entries[0].moved.length, 1);          // newest = the move event
+  assert.equal(entries[0].moved[0].to, 'Building');
+  assert.ok(entries[0].at);
+});
+
+test('readLog: malformed lines are skipped and counted, never fatal; n caps the result', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [item(1)], {});
+  await writeSnapshot(dir, [item(2)], {});
+  await writeSnapshot(dir, [item(3)], {});
+  const logPath = join(dir, '.github-boards', 'snapshots', 'log.jsonl');
+  writeFileSync(logPath, readFileSync(logPath, 'utf8') + '{torn line\n', 'utf8');
+  const { entries, skippedLines } = await readLog(dir, 2);
+  assert.equal(skippedLines, 1);
+  assert.equal(entries.length, 2); // capped
+});
+
+test('readLog: no log yet -> empty, not an error', async () => {
+  const dir = tmp();
+  assert.deepEqual(await readLog(dir, 10), { entries: [], skippedLines: 0 });
 });

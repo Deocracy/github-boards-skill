@@ -101,3 +101,126 @@ export function diffSnapshots(prevItems, currItems) {
   }
   return { moved, added, removed, relabeled, retitled };
 }
+
+/**
+ * List snapshots newest-first (readdir + filename filter + per-file header read).
+ * An unreadable snapshot file is listed with label '(unreadable)' rather than
+ * hidden — corrupted history must be visible. Missing dir -> [].
+ * @param {string} dir
+ * @returns {Promise<{file:string, takenAt:string|null, label:string|null, count:number|null}[]>}
+ */
+export async function listSnapshots(dir) {
+  let names;
+  try {
+    names = await readdir(snapDir(dir));
+  } catch {
+    return [];
+  }
+  const files = names.filter((f) => SNAP_RE.test(f)).sort().reverse(); // chrono desc by construction
+  const out = [];
+  for (const file of files) {
+    try {
+      const s = JSON.parse(await readFile(join(snapDir(dir), file), 'utf8'));
+      out.push({ file, takenAt: s.takenAt ?? null, label: s.label ?? null, count: s.count ?? null });
+    } catch {
+      out.push({ file, takenAt: null, label: '(unreadable)', count: null });
+    }
+  }
+  return out;
+}
+
+/**
+ * Write a snapshot — unless the board is unchanged (content-hash dedup vs the
+ * newest snapshot). On every NON-skipped write, append one event line to
+ * log.jsonl (first ever -> {initial}, else the diff vs the previous newest),
+ * then prune snapshot files beyond `keep`. The log is NEVER pruned.
+ * Same-millisecond collisions bump the stamp by 1ms until free; takenAt always
+ * equals the bumped stamp's ISO form so file order === takenAt order.
+ * @param {string} dir
+ * @param {object[]} items  listItems-shaped board items
+ * @param {{label?:string|null, keep?:number}} [opts]
+ * @returns {Promise<{path:string, skipped:false, logged:boolean}|{skipped:true, reason:string}>}
+ */
+export async function writeSnapshot(dir, items, { label = null, keep = DEFAULT_KEEP } = {}) {
+  const d = snapDir(dir);
+  await mkdir(d, { recursive: true });
+
+  const itemsHash = contentHash(normalizeForHash(items));
+  const existing = (await readdir(d)).filter((f) => SNAP_RE.test(f)).sort().reverse();
+
+  let prevItems;
+  if (existing.length) {
+    try {
+      const newest = JSON.parse(await readFile(join(d, existing[0]), 'utf8'));
+      if (newest.itemsHash === itemsHash) {
+        return { skipped: true, reason: `unchanged since ${newest.takenAt}` };
+      }
+      prevItems = newest.items;
+    } catch {
+      /* unreadable newest -> treat as no-previous (write proceeds, log line is 'initial') */
+    }
+  }
+
+  // Stamp + collision bump (tight loops can write twice in one millisecond).
+  let stampDate = new Date();
+  let file = `snapshot-${stampFor(stampDate)}.json`;
+  const taken = new Set(existing);
+  while (taken.has(file)) {
+    stampDate = new Date(stampDate.getTime() + 1);
+    file = `snapshot-${stampFor(stampDate)}.json`;
+  }
+  const takenAt = stampDate.toISOString();
+
+  const snap = { takenAt, label, count: (items || []).length, itemsHash, items: items || [] };
+  await writeFile(join(d, file), JSON.stringify(snap, null, 2), 'utf8');
+
+  // Event log: append-only, never pruned. One compact line per observed change.
+  const entry = prevItems !== undefined
+    ? { at: takenAt, ...diffSnapshots(prevItems, items || []) }
+    : { at: takenAt, initial: true, count: (items || []).length };
+  await appendFile(join(d, LOG_FILE), `${JSON.stringify(entry)}\n`, 'utf8');
+
+  // Prune snapshot FILES beyond keep (the filename filter can never match log.jsonl
+  // or foreign files, so they are structurally safe).
+  const k = Number.isInteger(keep) && keep > 0 ? keep : DEFAULT_KEEP;
+  const after = (await readdir(d)).filter((f) => SNAP_RE.test(f)).sort().reverse();
+  for (const old of after.slice(k)) {
+    try {
+      await unlink(join(d, old));
+    } catch {
+      /* a vanished file is already pruned */
+    }
+  }
+
+  return { path: join(d, file), skipped: false, logged: true };
+}
+
+/**
+ * Read the event log, newest-first, capped at n. Malformed lines (torn writes)
+ * are skipped and counted — one bad line must not orphan the journal.
+ * Missing log -> empty.
+ * @param {string} dir
+ * @param {number} [n]
+ * @returns {Promise<{entries:object[], skippedLines:number}>}
+ */
+export async function readLog(dir, n = 20) {
+  let raw;
+  try {
+    raw = await readFile(join(snapDir(dir), LOG_FILE), 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return { entries: [], skippedLines: 0 };
+    throw e;
+  }
+  const entries = [];
+  let skippedLines = 0;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      skippedLines += 1;
+    }
+  }
+  entries.reverse();
+  return { entries: entries.slice(0, Math.max(0, n)), skippedLines };
+}
