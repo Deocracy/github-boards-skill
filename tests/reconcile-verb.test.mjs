@@ -196,3 +196,30 @@ test('reconcileApply: ADOPT is also self-extinguishing — re-scan clean, re-app
   assert.equal(again.report.adopted.length, 0);
   assert.equal((await readLedger(dir)).candidates.length, 1); // still exactly one adopted candidate
 });
+
+test('reconcileApply: refuses --staged (scan IS the preview)', async () => {
+  const dir = tmp();
+  await seedLedger(dir, []);
+  const engine = makeMockEngine({ listItemsWithBodies: () => ({ items: [], count: 0 }) });
+  await assert.rejects(
+    () => reconcileApply(null, { engine, config: CFG, staged: true, dir }),
+    /scan' IS the preview/,
+  );
+});
+
+test('reconcileScan/Apply: resume-pending passes through reports; the candidate is untouched', async () => {
+  const dir = tmp();
+  await seedLedger(dir, [{ id: CID, title: 'Wire auth', note: '', source: 'manual', suggestedLane: 'Building', suggestedOwner: 'agent', addedAt: 't', status: 'mapped', promotion: { issueNumber: 1, issueUrl: 'u1', issueNodeId: 'n1' } }]);
+  const engine = makeMockEngine({ listItemsWithBodies: () => ({ items: [liveItem(CID)], count: 1 }) });
+
+  const scan = await reconcileScan({ engine, config: CFG, dir });
+  assert.deepEqual(scan.drift.resumePending.map((r) => r.candidateId), [CID]);
+  assert.match(scan.say, /resume-pending/);
+
+  const { report, say } = await reconcileApply(null, { engine, config: CFG, dir });
+  assert.deepEqual(report.resumePending.map((r) => r.candidateId), [CID]);
+  assert.match(say, /resume-pending/);
+  const after = (await readLedger(dir)).candidates[0];
+  assert.equal(after.status, 'mapped'); // untouched — promote's job
+  assert.equal(after.promotion.issueNumber, 1);
+});

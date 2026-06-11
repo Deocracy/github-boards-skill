@@ -727,9 +727,12 @@ export async function reconcileScan(ctx) {
   const { items } = await ctx.engine.listItemsWithBodies();
   const sourceExists = ctx.sourceExists || ((p) => existsSync(join(dir, p)));
   const drift = classifyDrift({ ledger, items, sourceExists });
-  const say = drift.clean
+  let say = drift.clean
     ? 'Reconcile scan: clean — ledger and board agree.'
     : `Reconcile scan: ${drift.safeHeals.length} safe heal(s), ${drift.uncertain.length} need a decision, ${drift.duplicates.length} duplicate marker group(s).`;
+  if (drift.resumePending.length) {
+    say += ` ${drift.resumePending.length} resume-pending — run 'promote apply' to finish their chains.`;
+  }
   return { drift, say };
 }
 
@@ -745,6 +748,9 @@ export async function reconcileScan(ctx) {
  * @returns {Promise<{report:object, say:string}>}
  */
 export async function reconcileApply(decisions, ctx) {
+  if (ctx.staged) {
+    throw new Error("reconcile: 'reconcile scan' IS the preview — apply writes only the ledger and has no --staged mode.");
+  }
   const dir = ctx.dir || process.cwd();
   const { drift } = await reconcileScan(ctx);
   const { toApply, held, errors } = resolveReconcileDecisions(drift, decisions);
@@ -759,6 +765,7 @@ export async function reconcileApply(decisions, ctx) {
     healed: [], adopted: [], reset: [], dismissed: [], kept: [],
     held: held.map((h) => h.candidateId),
     duplicates: drift.duplicates,
+    resumePending: drift.resumePending,
     errors: [],
   };
 
@@ -800,7 +807,9 @@ export async function reconcileApply(decisions, ctx) {
   const say = `Reconcile: ${report.healed.length} healed, ${report.adopted.length} adopted, ` +
     `${report.reset.length} reset for re-promotion, ${report.dismissed.length} dismissed, ` +
     `${report.kept.length} kept, ${report.held.length} held` +
-    (report.duplicates.length ? `, ${report.duplicates.length} duplicate group(s) reported` : '') + '.';
+    (report.duplicates.length ? `, ${report.duplicates.length} duplicate group(s) reported` : '') +
+    (report.resumePending.length ? `, ${report.resumePending.length} resume-pending (promote's job)` : '') +
+    '.';
   return { report, say };
 }
 

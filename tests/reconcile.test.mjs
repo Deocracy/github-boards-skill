@@ -28,7 +28,7 @@ test('clean board: promoted candidate whose marker is live -> nothing flagged', 
     items: [item(CID_A, { issueNumber: 1 })],
     sourceExists: exists,
   });
-  assert.deepEqual(d, { safeHeals: [], uncertain: [], duplicates: [], clean: true });
+  assert.deepEqual(d, { safeHeals: [], resumePending: [], uncertain: [], duplicates: [], clean: true });
 });
 
 test('clean: unpromoted candidate with no marker anywhere (normal pre-promotion)', () => {
@@ -50,13 +50,18 @@ test('CRASH-ORPHAN: live marker, candidate not promoted -> safe heal with adopte
   assert.equal(d.clean, false);
 });
 
-test('CRASH-ORPHAN: even a dismissed candidate with a live marker is settled (board reality wins)', () => {
+test('DISMISSED-BUT-LIVE: dismissed candidate with a live marker -> uncertain question, never auto-resurrected', () => {
   const d = classifyDrift({
     ledger: { candidates: [cand(CID_A, { status: 'dismissed' })] },
     items: [item(CID_A)],
     sourceExists: exists,
   });
-  assert.equal(d.safeHeals[0].kind, 'crash-orphan');
+  assert.equal(d.safeHeals.length, 0);
+  assert.equal(d.uncertain.length, 1);
+  const u = d.uncertain[0];
+  assert.equal(u.kind, 'dismissed-but-live');
+  assert.deepEqual(u.options, ['settle', 'keep']);
+  assert.match(u.question, /dismissed/);
 });
 
 test('CRASH-ORPHAN: merged/split statuses with a live marker also settle (any non-promoted status)', () => {
@@ -251,4 +256,48 @@ test('resolveReconcileDecisions: malformed decisions object tolerated as empty',
   const drift = { safeHeals: [], uncertain: [], duplicates: [] };
   assert.equal(resolveReconcileDecisions(drift, 'garbage').errors.length, 0);
   assert.equal(resolveReconcileDecisions(drift, [1, 2]).errors.length, 0);
+});
+
+test('RESUME-PENDING: unsettled candidate WITH promotion refs + live marker -> reported, NOT settled (promote finishes the chain)', () => {
+  const d = classifyDrift({
+    ledger: { candidates: [cand(CID_A, { status: 'mapped', promotion: { issueNumber: 7, issueUrl: 'u7', issueNodeId: 'n7' } })] },
+    items: [item(CID_A, { issueNumber: 7, itemId: 'it-7' })],
+    sourceExists: exists,
+  });
+  assert.equal(d.safeHeals.length, 0, 'must NOT be a safe heal');
+  assert.deepEqual(d.resumePending.map((r) => r.candidateId), [CID_A]);
+  assert.equal(d.resumePending[0].kind, 'resume-pending');
+  assert.equal(d.clean, false);
+});
+
+test('DEAD-SOURCE is suppressed for cids already classified by marker (no double-bucket poison)', () => {
+  const d = classifyDrift({
+    ledger: { candidates: [cand(CID_A, { status: 'mapped', source: 'docs/gone.md#t1' })] },
+    items: [item(CID_A)], // live marker, no refs -> crash-orphan
+    sourceExists: () => false, // source is dead too
+  });
+  assert.deepEqual(d.safeHeals.map((s) => s.kind), ['crash-orphan']);
+  assert.equal(d.uncertain.length, 0, 'dead-source must not double-bucket a marker-classified cid');
+});
+
+test("resolveReconcileDecisions: a decision naming a resume-pending cid is refused (promote's job)", () => {
+  const drift = {
+    safeHeals: [],
+    resumePending: [{ kind: 'resume-pending', candidateId: CID_A, title: 't', refs: { issueNumber: 7 } }],
+    uncertain: [], duplicates: [],
+  };
+  const { errors } = resolveReconcileDecisions(drift, { [CID_A]: { action: 'keep' } });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].error, /resume-pending/);
+});
+
+test('resolveReconcileDecisions: decided dismissed-but-live settle joins toApply', () => {
+  const drift = {
+    safeHeals: [], resumePending: [],
+    uncertain: [{ kind: 'dismissed-but-live', candidateId: CID_A, title: 't', refs: { issueNumber: 7, issueUrl: null, itemId: 'it-7' }, question: 'q', options: ['settle', 'keep'] }],
+    duplicates: [],
+  };
+  const { toApply, errors } = resolveReconcileDecisions(drift, { [CID_A]: { action: 'settle' } });
+  assert.equal(errors.length, 0);
+  assert.deepEqual(toApply.map((a) => [a.candidateId, a.action]), [[CID_A, 'settle']]);
 });

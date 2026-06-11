@@ -16,6 +16,7 @@ import { parseCid } from './promote.mjs';
 export const RECONCILE_ACTIONS = {
   vanished: ['re-promote', 'dismiss', 'keep'],
   'dead-source': ['dismiss', 'keep'],
+  'dismissed-but-live': ['settle', 'keep'],
 };
 
 /** Does this candidate `source` string name a file path (vs 'manual' etc.)? */
@@ -32,7 +33,7 @@ function isPathLike(file) {
  * @param {object[]|null} args.items       engine.listItemsWithBodies() items
  *        ({itemId, issueNumber, title, stageLabel, labels, body, issueUrl})
  * @param {(path:string)=>boolean} args.sourceExists  fs existence predicate
- * @returns {{safeHeals:object[], uncertain:object[], duplicates:object[], clean:boolean}}
+ * @returns {{safeHeals:object[], resumePending:object[], uncertain:object[], duplicates:object[], clean:boolean}}
  */
 export function classifyDrift({ ledger, items, sourceExists }) {
   const candidates = (ledger && ledger.candidates) || [];
@@ -55,6 +56,7 @@ export function classifyDrift({ ledger, items, sourceExists }) {
   const candById = new Map(candidates.map((c) => [c.id, c]));
 
   const safeHeals = [];
+  const resumePending = [];
   const uncertain = [];
   const duplicates = [];
 
@@ -73,13 +75,41 @@ export function classifyDrift({ ledger, items, sourceExists }) {
     if (!c) {
       // UNKNOWN-MARKER: skill-created card with no ledger record (ledger wiped?).
       safeHeals.push({ kind: 'unknown-marker', candidateId: cid, title: it.title ?? null, refs });
-    } else if (c.status !== 'promoted') {
-      // CRASH-ORPHAN: the M3a create->persist window (or any unsettled state —
-      // incl. 'dismissed': a live card is board reality, and the ledger mirrors it).
+    } else if (c.status === 'promoted') {
+      // clean (even if recorded refs are stale — YAGNI).
+    } else if (c.status === 'dismissed') {
+      // DISMISSED-BUT-LIVE: the user dismissed the candidate, yet its card is
+      // live on the board. Auto-resurrecting would silently reverse deliberate
+      // intent; leaving it would drift forever. Ask.
+      uncertain.push({
+        kind: 'dismissed-but-live', candidateId: cid, title: c.title, refs,
+        question: `"${c.title}" was dismissed in the ledger, but its card (#${it.issueNumber}) is live on the board. Settle it as promoted, or keep it dismissed?`,
+        options: [...RECONCILE_ACTIONS['dismissed-but-live']],
+      });
+    } else if (c.promotion && c.promotion.issueNumber != null) {
+      // RESUME-PENDING: refs persisted but promote's chain may be unfinished
+      // (setStage/setLabels may never have run — the only crash states a board
+      // scan can actually observe carry refs). Settling here would foreclose
+      // promote's resume and freeze a half-configured card forever. Report it;
+      // `promote apply` finishes the chain and settles the status itself.
+      resumePending.push({ kind: 'resume-pending', candidateId: cid, title: c.title, refs });
+    } else {
+      // CRASH-ORPHAN: live marker, NO promotion refs (ledger restored/wiped or
+      // hand-edited — unreachable from a real M3a crash, which persists refs
+      // before the item can appear on the board). Settling adopts board
+      // reality and prevents promote from creating a duplicate for this cid.
       safeHeals.push({ kind: 'crash-orphan', candidateId: cid, title: c.title, refs });
     }
-    // promoted + marker live -> clean (even if recorded refs are stale — YAGNI).
   }
+
+  // Cids already classified above must not double-bucket into dead-source —
+  // answering a dead-source question about a safe-heal cid would poison the
+  // whole apply (resolveReconcileDecisions rejects decisions on safe heals).
+  const markerClassified = new Set([
+    ...safeHeals.map((s) => s.candidateId),
+    ...resumePending.map((r) => r.candidateId),
+    ...uncertain.map((u) => u.candidateId),
+  ]);
 
   // VANISHED: promoted card-kind candidate with no live presence by marker OR number.
   for (const c of candidates) {
@@ -97,6 +127,7 @@ export function classifyDrift({ ledger, items, sourceExists }) {
 
   // DEAD-SOURCE: unsettled candidate whose path-like source file is gone.
   for (const c of candidates) {
+    if (markerClassified.has(c.id)) continue;
     if (!['candidate', 'mapped', 'needs-decision'].includes(c.status)) continue;
     const src = typeof c.source === 'string' ? c.source : '';
     const file = src.split('#')[0].trim();
@@ -110,8 +141,8 @@ export function classifyDrift({ ledger, items, sourceExists }) {
   }
 
   return {
-    safeHeals, uncertain, duplicates,
-    clean: safeHeals.length === 0 && uncertain.length === 0 && duplicates.length === 0,
+    safeHeals, resumePending, uncertain, duplicates,
+    clean: safeHeals.length === 0 && resumePending.length === 0 && uncertain.length === 0 && duplicates.length === 0,
   };
 }
 
@@ -136,8 +167,13 @@ export function resolveReconcileDecisions(drift, decisions) {
   const decided = [];
   const uncertainById = new Map(uncertain.map((u) => [u.candidateId, u]));
   const safeIds = new Set(safeHeals.map((s) => s.candidateId));
+  const resumeIds = new Set(((drift && drift.resumePending) || []).map((r) => r.candidateId));
 
   for (const [cid, d] of Object.entries(dec)) {
+    if (resumeIds.has(cid)) {
+      errors.push({ candidateId: cid, error: "resume-pending — run 'promote apply' to finish the chain; reconcile takes no decision here" });
+      continue;
+    }
     if (safeIds.has(cid)) {
       errors.push({ candidateId: cid, error: 'safe heals apply automatically — no decision accepted' });
       continue;

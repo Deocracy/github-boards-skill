@@ -65,27 +65,58 @@ test('healthy pipeline -> reconcile scan is CLEAN (real marker bodies round-trip
   assert.equal(drift.clean, true);
 });
 
-test('CRASH WINDOW healed: revert status+promotion after a real promote -> drift detected -> healed -> clean', async () => {
+test('REACHABLE crash window (refs persisted, chain unfinished) -> resume-pending -> REAL promote apply finishes it -> clean', async () => {
   const dir = mkdtempSync(join(os.tmpdir(), 'gbs-rpipe-'));
-  const { engine } = makeBoard();
-  const id = await pipelineToBoard(dir, engine);
+  const board = makeBoard();
+  const id = await pipelineToBoard(dir, board.engine);
 
-  // Simulate the M3a accepted window: issue exists, ledger never settled.
+  // The ONLY crash state a board scan can observe: item on board => refs were
+  // persisted first (M3a order: create -> persist -> add -> persist -> stage/label -> settle).
+  const ledger = await readLedger(dir);
+  const cand = ledger.candidates.find((c) => c.id === id);
+  cand.status = 'mapped'; // chain never settled
+  // promotion refs KEPT — that is what the persist-after-create guarantees
+  await writeLedger(dir, ledger);
+
+  const scan = await reconcileScan({ engine: board.engine, config: CFG, dir });
+  assert.equal(scan.drift.safeHeals.length, 0, 'reconcile must NOT settle a resume-pending partial');
+  assert.deepEqual(scan.drift.resumePending.map((r) => r.candidateId), [id]);
+
+  // Reconcile leaves it; the REAL promote apply resumes the chain.
+  await reconcileApply(null, { engine: board.engine, config: CFG, dir });
+  assert.equal((await readLedger(dir)).candidates.find((c) => c.id === id).status, 'mapped');
+
+  const before = board.issues.length;
+  await promoteApply(null, { engine: board.engine, config: CFG, staged: false, dir });
+  assert.equal(board.issues.length, before, 'resume must NOT create a second issue');
+  assert.equal((await readLedger(dir)).candidates.find((c) => c.id === id).status, 'promoted');
+
+  const rescan = await reconcileScan({ engine: board.engine, config: CFG, dir });
+  assert.equal(rescan.drift.clean, true);
+});
+
+test('REFS-LOST state (ledger restored/hand-edited) -> crash-orphan settle -> clean', async () => {
+  const dir = mkdtempSync(join(os.tmpdir(), 'gbs-rpipe-'));
+  const board = makeBoard();
+  const id = await pipelineToBoard(dir, board.engine);
+
+  // Unreachable from a real M3a crash, but reachable via ledger restore/wipe:
+  // status unsettled AND refs gone. Settling prevents a duplicate issue.
   const ledger = await readLedger(dir);
   const cand = ledger.candidates.find((c) => c.id === id);
   cand.status = 'mapped';
   delete cand.promotion;
   await writeLedger(dir, ledger);
 
-  const scan = await reconcileScan({ engine, config: CFG, dir });
+  const scan = await reconcileScan({ engine: board.engine, config: CFG, dir });
   assert.deepEqual(scan.drift.safeHeals.map((h) => h.kind), ['crash-orphan']);
 
-  await reconcileApply(null, { engine, config: CFG, dir });
+  await reconcileApply(null, { engine: board.engine, config: CFG, dir });
   const after = (await readLedger(dir)).candidates.find((c) => c.id === id);
   assert.equal(after.status, 'promoted');
   assert.equal(after.promotion.issueNumber, 1);
 
-  const rescan = await reconcileScan({ engine, config: CFG, dir });
+  const rescan = await reconcileScan({ engine: board.engine, config: CFG, dir });
   assert.equal(rescan.drift.clean, true);
 });
 
