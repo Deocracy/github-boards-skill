@@ -4,7 +4,7 @@
 // the prose once went two milestones stale without anything failing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,4 +84,21 @@ test('references/ links in SKILL.md resolve to real files', () => {
   for (const r of refs) {
     assert.ok(existsSync(join(ROOT, 'skills', 'github-boards', r)), `SKILL.md links ${r} but the file does not exist`);
   }
+});
+
+test('evals/scenarios.json is valid and covers negatives', () => {
+  const sc = JSON.parse(read('evals/scenarios.json'));
+  assert.ok(Array.isArray(sc) && sc.length >= 15, `expected >=15 scenarios, found ${sc.length}`);
+  assert.ok(sc.filter((s) => s.expectVerb === null).length >= 3, 'need >=3 negative scenarios (expectVerb: null)');
+  for (const s of sc) {
+    assert.ok(s.id && typeof s.say === 'string' && 'expectVerb' in s, `malformed scenario: ${JSON.stringify(s)}`);
+  }
+});
+
+test('eval runner refuses without GBS_EVAL=1 (the gate is the enforcement)', () => {
+  const env = { ...process.env };
+  delete env.GBS_EVAL;
+  const r = spawnSync(process.execPath, [join(ROOT, 'scripts', 'eval-skill.mjs')], { encoding: 'utf8', env });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /GBS_EVAL=1/);
 });

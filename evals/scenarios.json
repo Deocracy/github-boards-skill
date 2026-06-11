@@ -1,0 +1,19 @@
+[
+  { "id": "put-1",          "say": "put this on the board: fix the login bug",                       "expectVerb": "put" },
+  { "id": "queue-human",    "say": "what's on my plate?",                                            "expectVerb": "queue" },
+  { "id": "queue-agent",    "say": "what is Claude working on right now?",                           "expectVerb": "queue" },
+  { "id": "move-1",         "say": "move card 41 to Building",                                       "expectVerb": "move" },
+  { "id": "route-1",        "say": "card 12 actually needs me, not Claude",                          "expectVerb": "route" },
+  { "id": "reject-1",       "say": "reject #7 but keep the learnings",                               "expectVerb": "reject" },
+  { "id": "summary-1",      "say": "what changed on the board since yesterday?",                     "expectVerb": "summary" },
+  { "id": "followup-1",     "say": "Claude found two more tasks while working #5 — file them under it", "expectVerb": "followup" },
+  { "id": "map-1",          "say": "figure out which of these meeting notes belong on the board",    "expectVerb": "map" },
+  { "id": "promote-1",      "say": "promote the mapped backlog onto the board",                      "expectVerb": "promote" },
+  { "id": "sync-1",         "say": "sync my TODO file onto the board",                               "expectVerb": "sync" },
+  { "id": "reconcile-1",    "say": "I think the ledger is out of sync with the board — heal it",     "expectVerb": "reconcile" },
+  { "id": "snapshot-hist",  "say": "what did the board look like before yesterday's cleanup?",       "expectVerb": "snapshot" },
+  { "id": "undo-1",         "say": "undo everything that happened on the board since this morning",  "expectVerb": "snapshot", "expectArgs": "invert" },
+  { "id": "neg-code-move",  "say": "move this function into utils.mjs",                              "expectVerb": null },
+  { "id": "neg-screenshot", "say": "take a screenshot of the homepage",                              "expectVerb": null },
+  { "id": "neg-gpu",        "say": "what's the best graphics card for gaming?",                      "expectVerb": null }
+]
