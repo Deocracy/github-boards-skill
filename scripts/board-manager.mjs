@@ -1110,6 +1110,8 @@ async function cli() {
   promote apply [--decisions <file>]    promote confident + decided candidates to the board (idempotent)
   sync scan                             what changed in watched source files (read-only)
   sync record --extracted <file>        record the LLM's extracted work items into the ledger
+  reconcile scan                        drift report: ledger vs board vs source files (read-only)
+  reconcile apply [--decisions <file>]  heal drift — ledger-only writes (board untouched)
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -1284,6 +1286,25 @@ async function cli() {
       } else {
         throw new Error('usage: promote <plan|apply> [--decisions <file>] [--staged]');
       }
+    }
+    case 'reconcile': {
+      const sub = rest[0];
+      const { readFile } = await import('node:fs/promises');
+      if (sub === 'scan' || !sub) {
+        const r = await reconcileScan({ ...ctx, dir: process.cwd() });
+        console.log(r.say);
+        console.log(JSON.stringify(r.drift, null, 2));
+        return;
+      }
+      if (sub === 'apply') {
+        let d = null;
+        if (decisionsPath) d = JSON.parse(await readFile(decisionsPath, 'utf8'));
+        const r = await reconcileApply(d, { ...ctx, dir: process.cwd() });
+        console.log(r.say);
+        console.log(JSON.stringify(r.report, null, 2));
+        return;
+      }
+      throw new Error('usage: reconcile <scan|apply> [--decisions <file>]');
     }
     default:
       throw new Error(`unknown verb '${verb}'. Run --help for the verb map.`);

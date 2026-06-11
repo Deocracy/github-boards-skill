@@ -183,3 +183,16 @@ test('reconcileApply: duplicates pass through to the report untouched (report-on
   const { report } = await reconcileApply(null, { engine, config: CFG, dir });
   assert.deepEqual(report.duplicates, [{ cid: CID, issueNumbers: [4, 9], kept: 4 }]);
 });
+
+test('reconcileApply: ADOPT is also self-extinguishing — re-scan clean, re-apply adopts nothing', async () => {
+  const dir = tmp();
+  await seedLedger(dir, []);
+  const engine = makeMockEngine({ listItemsWithBodies: () => ({ items: [liveItem(CID, { title: 'Orphan card', issueNumber: 3, itemId: 'it-3' })], count: 1 }) });
+
+  await reconcileApply(null, { engine, config: CFG, dir });
+  const rescan = await reconcileScan({ engine, config: CFG, dir });
+  assert.equal(rescan.drift.clean, true);
+  const again = await reconcileApply(null, { engine, config: CFG, dir });
+  assert.equal(again.report.adopted.length, 0);
+  assert.equal((await readLedger(dir)).candidates.length, 1); // still exactly one adopted candidate
+});
