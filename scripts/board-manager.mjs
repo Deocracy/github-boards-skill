@@ -1256,6 +1256,7 @@ async function cli() {
   snapshot list                         stored snapshots, newest first
   snapshot diff [<ref>] [<ref2>]        what changed between two points (defaults: latest vs live board)
   snapshot log [N]                      the permanent event journal (default last 20)
+  snapshot invert [<ref>] [<ref2>]      the undo plan: inverse ops to restore a point (read-only)
 
   --staged          preview every write; nothing is committed
   --config <path>   board.json (default ../board.json via board.mjs)`);
@@ -1346,8 +1347,8 @@ async function cli() {
     // take / diff need the engine — fall through to loadConfig below.
     // Unknown sub-verbs get a usage error here (before loadConfig) so an
     // unconfigured repo does not produce a confusing config-not-found error.
-    if (sub !== 'take' && sub !== 'diff') {
-      throw new Error('usage: snapshot <take ["label"] | list | diff <ref> [<ref2>] | log [N]>');
+    if (sub !== 'take' && sub !== 'diff' && sub !== 'invert') {
+      throw new Error('usage: snapshot <take ["label"] | list | diff [<ref>] [<ref2>] | invert [<ref>] [<ref2>] | log [N]>');
     }
   }
 
@@ -1488,8 +1489,14 @@ async function cli() {
         console.log(JSON.stringify(r.diff, null, 2));
         return;
       }
+      if (sub === 'invert') {
+        const r = await snapshotInvert(rest[1] || 'latest', rest[2] || null, { ...ctx, dir: process.cwd() });
+        console.log(r.say);
+        console.log(JSON.stringify({ ops: r.ops, manual: r.manual }, null, 2));
+        return;
+      }
       // list, log, and unknown sub-verbs are handled in Tier-0 (above) and never reach here.
-      throw new Error('usage: snapshot <take ["label"] | list | diff <ref> [<ref2>] | log [N]>');
+      throw new Error('usage: snapshot <take ["label"] | list | diff [<ref>] [<ref2>] | invert [<ref>] [<ref2>] | log [N]>');
     }
     default:
       throw new Error(`unknown verb '${verb}'. Run --help for the verb map.`);

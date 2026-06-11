@@ -150,3 +150,11 @@ test('snapshotInvert: added card lands in manual — never deletable; say points
   assert.match(r.manual[0].reason, /never auto-deleted/);
   assert.match(r.say, /manual/i);
 });
+
+test('snapshotInvert: direction — refA is the RESTORE TARGET (older ref first); ops point back to refA state', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [boardItem(1)], {});                                  // ~2: Ideas
+  await writeSnapshot(dir, [boardItem(1, { stageLabel: 'Building' })], {});      // ~1: Building
+  const r = await snapshotInvert('~2', '~1', { engine: engineWith([]), config: CFG, dir });
+  assert.deepEqual(r.ops.map((o) => [o.op, o.to]), [['move', 'Ideas']], 'undo must restore the refA (older) lane');
+});
