@@ -114,7 +114,7 @@ test('snapshotInvert: ref vs live — proposes the inverse move; READ-ONLY (no w
   assert.deepEqual(r.ops, [{ op: 'move', itemId: 'it-1', issueNumber: 1, title: 'Card 1', to: 'Ideas' }]);
   assert.deepEqual(r.manual, []);
   assert.match(r.say, /1 op/);
-  const writeOps = engine.calls.filter((c) => ['createIssue', 'setStage', 'setLabels', 'removeLabels', 'addIssueToBoard', 'comment'].includes(c.op));
+  const writeOps = engine.calls.filter((c) => ['createIssue', 'setStage', 'setLabels', 'removeLabels', 'addIssueToBoard', 'comment', 'createProject', 'createStageField', 'ensureLabels'].includes(c.op));
   assert.deepEqual(writeOps, [], 'snapshot invert must never write');
 });
 
@@ -157,4 +157,14 @@ test('snapshotInvert: direction — refA is the RESTORE TARGET (older ref first)
   await writeSnapshot(dir, [boardItem(1, { stageLabel: 'Building' })], {});      // ~1: Building
   const r = await snapshotInvert('~2', '~1', { engine: engineWith([]), config: CFG, dir });
   assert.deepEqual(r.ops.map((o) => [o.op, o.to]), [['move', 'Ideas']], 'undo must restore the refA (older) lane');
+});
+
+test('snapshotInvert: empty diff vs live with multiple snapshots warns about the anchor trap', async () => {
+  const dir = tmp();
+  await writeSnapshot(dir, [boardItem(1)], {});
+  await writeSnapshot(dir, [boardItem(1), boardItem(2)], {});
+  const engine = engineWith([boardItem(1), boardItem(2)]); // live == newest snapshot
+  const r = await snapshotInvert('latest', null, { engine, config: CFG, dir });
+  assert.match(r.say, /nothing to undo/i);
+  assert.match(r.say, /older ref/i);
 });

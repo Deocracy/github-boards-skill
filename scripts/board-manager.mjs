@@ -1053,6 +1053,12 @@ export async function snapshotInvert(refA, refB, ctx) {
   let say;
   if (inv.ops.length === 0 && inv.manual.length === 0) {
     say = `Nothing to undo between ${a.takenAt} and ${bName}.`;
+    if (!refB) {
+      const snaps = await listSnapshots(dir);
+      if (snaps.length > 1) {
+        say += ' Note: summary auto-snapshots the current board, so the newest snapshot may already reflect these changes — run `snapshot list` and pick an older ref.';
+      }
+    }
   } else if (inv.ops.length === 0) {
     say = `No executable undo ops vs ${a.takenAt} — ${inv.manual.length} item(s) need manual attention.`;
   } else {
