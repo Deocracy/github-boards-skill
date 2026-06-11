@@ -29,7 +29,7 @@ import { ensureLedger, readLedger, writeLedger, appendCandidate, setIntent, cand
 import { prepareInput, applyProposals } from './lib/mapper.mjs';
 import { classify, resolveDecisions, cidMarker } from './lib/promote.mjs';
 import { PROFILES } from './lib/profiles.mjs';
-import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction } from './lib/sources.mjs';
+import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction, WATCH_GLOB_RE } from './lib/sources.mjs';
 
 // ===========================================================================
 // HELPERS (small + pure-ish, exported for unit testing)
@@ -514,11 +514,6 @@ export function presentDetectDirs(dir) {
     .filter((p) => p.detect !== null && existsSync(join(dir, p.detect)))
     .map((p) => p.detect);
 }
-
-// Supported watch-pattern forms (all three shipped profiles + user globs):
-//   literal file path           e.g. "TODO.md"
-//   <base>/**/*.<ext>           e.g. "docs/superpowers/plans/**/*.md"
-const WATCH_GLOB_RE = /^(.+)\/\*\*\/\*(\.[A-Za-z0-9]+)$/;
 
 /** Recursive file walk. Missing dir -> []. */
 async function walkFiles(base) {

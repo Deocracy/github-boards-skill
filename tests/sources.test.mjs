@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PROFILES } from '../scripts/lib/profiles.mjs';
-import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction } from '../scripts/lib/sources.mjs';
+import { contentHash, detectProfiles, diffSources, buildManifest, validateExtraction, matchesWatch, WATCH_GLOB_RE } from '../scripts/lib/sources.mjs';
 
 test('PROFILES ships superpowers, gsd, generic — generic LAST (first-match-wins attribution)', () => {
   assert.deepEqual(PROFILES.map((p) => p.name), ['superpowers', 'gsd', 'generic']);
@@ -181,4 +181,39 @@ test('validateExtraction: non-boolean done (e.g. "true") is a structural ERROR, 
   assert.equal(skippedDone.length, 0);
   assert.equal(errors.length, 1);
   assert.match(errors[0].error, /done must be a boolean/);
+});
+
+// ── Task 1 (M3c): matchesWatch + WATCH_GLOB_RE ─────────────────────────────
+
+test('matchesWatch: literal pattern — exact hit, near-miss misses', () => {
+  assert.equal(matchesWatch('TODO.md', ['TODO.md']), true);
+  assert.equal(matchesWatch('TODO.markdown', ['TODO.md']), false);
+  assert.equal(matchesWatch('sub/TODO.md', ['TODO.md']), false); // literal is exact, not basename
+});
+
+test('matchesWatch: glob pattern — base-prefix + ext, nested subpaths hit', () => {
+  const pats = ['docs/superpowers/plans/**/*.md'];
+  assert.equal(matchesWatch('docs/superpowers/plans/p1.md', pats), true);
+  assert.equal(matchesWatch('docs/superpowers/plans/sub/deep.md', pats), true);
+  assert.equal(matchesWatch('docs/superpowers/plans/notes.txt', pats), false); // wrong ext
+  assert.equal(matchesWatch('docs/superpowers/specs/x.md', pats), false);      // wrong base
+});
+
+test('matchesWatch: prefix-collision dirs do NOT match (plans-old vs plans)', () => {
+  assert.equal(matchesWatch('docs/superpowers/plans-old/x.md', ['docs/superpowers/plans/**/*.md']), false);
+});
+
+test('matchesWatch: unsupported glob forms and non-strings never match', () => {
+  assert.equal(matchesWatch('docs/x.md', ['docs/*.md']), false);   // single-star unsupported
+  assert.equal(matchesWatch('docs/x.md', [42, null]), false);      // non-strings skipped
+  assert.equal(matchesWatch('docs/x.md', []), false);
+  assert.equal(matchesWatch('docs/x.md', null), false);
+  assert.equal(matchesWatch('', ['TODO.md']), false);
+  assert.equal(matchesWatch(null, ['TODO.md']), false);
+});
+
+test('WATCH_GLOB_RE is exported (single shared definition with expandWatch)', () => {
+  assert.ok(WATCH_GLOB_RE instanceof RegExp);
+  assert.ok(WATCH_GLOB_RE.test('docs/superpowers/plans/**/*.md'));
+  assert.equal(WATCH_GLOB_RE.test('docs/*.md'), false);
 });

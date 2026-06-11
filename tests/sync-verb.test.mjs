@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import { presentDetectDirs, expandWatch, hashWatched, syncScan, syncRecord } from '../scripts/board-manager.mjs';
-import { detectProfiles } from '../scripts/lib/sources.mjs';
+import { detectProfiles, matchesWatch } from '../scripts/lib/sources.mjs';
 import { ensureLedger, readLedger, writeLedger, appendCandidate } from '../scripts/lib/ledger.mjs';
 
 const tmp = () => mkdtempSync(join(os.tmpdir(), 'gbs-sync-'));
@@ -251,4 +251,18 @@ test('syncScan: maxFiles cap exceeded -> throws before any hashing (hook degrade
   const dir = tmp();
   seedRepo(dir); // 2 watched files
   await assert.rejects(() => syncScan({ dir, config: null, maxFiles: 1 }), /exceeds cap/);
+});
+
+test('PARITY: every file expandWatch finds satisfies matchesWatch for the same patterns (and known misses fail both)', async () => {
+  const dir = tmp();
+  seedRepo(dir);
+  const patterns = ['docs/superpowers/plans/**/*.md', 'TODO.md', 'MISSING.md', 'docs/*.md'];
+  const found = await expandWatch(dir, patterns);
+  assert.ok(found.length > 0); // sanity: fixtures actually match
+  for (const f of found) {
+    assert.equal(matchesWatch(f, patterns), true, `expandWatch found ${f} but matchesWatch missed it`);
+  }
+  // known misses agree too
+  assert.ok(!found.includes('docs/superpowers/plans/notes.txt'));
+  assert.equal(matchesWatch('docs/superpowers/plans/notes.txt', patterns), false);
 });

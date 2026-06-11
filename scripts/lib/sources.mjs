@@ -116,3 +116,33 @@ export function validateExtraction(items) {
   });
   return { valid, skippedDone, errors };
 }
+
+// Supported watch-pattern forms (shared with board-manager's expandWatch —
+// single definition so the fs walker and the pure matcher cannot drift):
+//   literal file path           e.g. "TODO.md"
+//   <base>/**/*.<ext>           e.g. "docs/superpowers/plans/**/*.md"
+export const WATCH_GLOB_RE = /^(.+)\/\*\*\/\*(\.[A-Za-z0-9]+)$/;
+
+/**
+ * Pure string match of ONE repo-relative POSIX path against watch patterns.
+ * Same two supported forms as expandWatch: literal equality, and
+ * "<base>/**" + "/*.<ext>" (path under <base>/ with that extension). Non-string
+ * and unsupported patterns never match (parity with expandWatch). No fs.
+ * @param {string} relPath  repo-relative POSIX path (forward slashes)
+ * @param {string[]} patterns
+ * @returns {boolean}
+ */
+export function matchesWatch(relPath, patterns) {
+  if (typeof relPath !== 'string' || relPath === '') return false;
+  for (const pattern of patterns || []) {
+    if (typeof pattern !== 'string') continue;
+    const m = WATCH_GLOB_RE.exec(pattern);
+    if (m) {
+      if (relPath.startsWith(`${m[1]}/`) && relPath.endsWith(m[2])) return true;
+    } else if (!pattern.includes('*')) {
+      if (relPath === pattern) return true;
+    }
+    // other glob forms: unsupported -> never match
+  }
+  return false;
+}
