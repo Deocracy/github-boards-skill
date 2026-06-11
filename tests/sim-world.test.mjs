@@ -163,3 +163,17 @@ test('checkInvariants: A2 crash state (refs persisted, card never reached board)
   assert.equal(items[0].issueNumber, 1, 'resumed, not re-created');
   await w.checkInvariants();
 });
+
+// F3 regression: an unconsumed armed fault (e.g. A3 partial whose resume skips
+// addIssueToBoard, leaving an A2 fault unarmed) must NOT leak onto the next op.
+test('crashedPromote: an unconsumed armed fault is cleared — never leaks onto later ops', async () => {
+  const w = await makeWorld();
+  await w.ops.seedTodo(['One']);
+  await w.ops.pipelineSync(); await w.ops.mapAll();
+  await w.ops.crashedPromote('A3');  // partial: refs full, card on board, setStage died
+  await w.ops.crashedPromote('A2');  // resume path skips addIssueToBoard -> fault unconsumed
+  await w.ops.promoteAll();          // must NOT die of an injected leak
+  const { items } = await w.engine.listItems();
+  assert.equal(items.length, 1);
+  await w.checkInvariants();
+});

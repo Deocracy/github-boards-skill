@@ -73,6 +73,10 @@ export async function makeWorld({ config } = {}) {
       mkdirSync(join(dir, '.github-boards'), { recursive: true });
       writeFileSync(join(dir, '.github-boards', 'snapshots'), 'not a dir', 'utf8');
     },
+    /** Clear any armed (unconsumed) one-shot engine faults. Called at the end of
+     *  crashedPromote to ensure a fault that was never consumed by its intended
+     *  target op cannot leak onto a subsequent innocent operation (F3 fix). */
+    clearFaults() { fail.clear(); },
   };
 
   // ---- A1 arming flag (plain closure var — lets createIssue arm the sabotage
@@ -260,6 +264,10 @@ export async function makeWorld({ config } = {}) {
       else throw new Error(`unknown crash window ${window}`);
       const rep = await promoteApply(null, ctx());
       if (window === 'A1') faults.repairLedger();
+      // Clear any armed fault that was NOT consumed by this promote run (e.g. an A3
+      // partial whose resume path skips addIssueToBoard, leaving an A2-armed fault
+      // unconsumed). Without this the leaked fault would kill the next innocent op (F3).
+      faults.clearFaults();
       return rep;
     },
 
