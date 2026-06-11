@@ -1,9 +1,8 @@
----
-name: github-boards
-description: "Manage a GitHub Projects v2 Kanban board in natural language. Use when the user wants to put tasks or issues on a board, see what they (the human) need to work on versus what the AI is working on, move cards between lanes, route work as agent-actionable or human-actionable, reject with learnings, summarize what changed on the board, promote mapped backlog onto the board, sync TODOs or other skills' plans onto the board, check or heal ledger drift, browse board history, or undo recent board changes. Also use when ANOTHER skill needs to record tasks onto the board after research or planning. Reads and edits the board via the gh CLI and GitHub GraphQL, always previewing changes before writing and reporting back. Trigger phrases: put this on the board, add to kanban, what's on my plate, what is Claude working on, move card, update the board, show board status, reject with learnings, promote the backlog, sync my TODOs onto the board, heal the ledger, what changed this week, what did the board look like before, undo what happened since."
-allowed-tools: "Bash, Read, Write"
----
+# github-boards — agent instructions (vendor-neutral mirror)
 
+> This file mirrors `skills/github-boards/SKILL.md` for agents that don't read Claude skill frontmatter. **Do not edit below the marker** — edit SKILL.md and re-copy its body; `tests/skill-evals.test.mjs` enforces identity.
+
+<!-- BEGIN MIRROR -->
 # GitHub Boards
 
 Drive a GitHub Projects (v2) Kanban board for the user in plain language, and let other skills record work onto it. This instruction body is **vendor-neutral** (it must mirror to `AGENTS.md` with no rewrite) — all board logic lives in the bundled script, not in this prose.
