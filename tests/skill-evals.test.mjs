@@ -102,3 +102,14 @@ test('eval runner refuses without GBS_EVAL=1 (the gate is the enforcement)', () 
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /GBS_EVAL=1/);
 });
+
+test('demo SVG: parses as XML, references no external resources, and its text comes from the committed transcript', () => {
+  const svg = read('assets/demo.svg');
+  assert.ok(svg.startsWith('<svg'), 'demo.svg must be a bare inline SVG');
+  assert.ok(!/href\s*=|url\(http|<image/i.test(svg), 'no external resources — GitHub strips them');
+  const transcript = JSON.parse(read('assets/demo-transcript.json'));
+  for (const line of transcript.lines) {
+    const probe = line.text.slice(0, 40).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    assert.ok(svg.includes(probe.split(' ').slice(0, 4).join(' ')), `transcript line missing from SVG: ${line.text.slice(0, 50)}…`);
+  }
+});

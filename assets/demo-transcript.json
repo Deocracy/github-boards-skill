@@ -1,0 +1,13 @@
+{
+  "title": "github-boards",
+  "lines": [
+    { "role": "user",      "text": "> put these on the board: fix the login redirect bug (for Claude), renew the grant paperwork (for me)" },
+    { "role": "agent",     "text": "Running it staged first — nothing is written yet:" },
+    { "role": "preview",   "text": "Would file 2 card(s): 'Fix login redirect bug' → Ideas (agent); 'Renew grant paperwork' → Ideas (human). On your plate: 1 card(s). Claude's queue: 1 card(s)." },
+    { "role": "agent",     "text": "Look right? (y/n)" },
+    { "role": "user",      "text": "> y" },
+    { "role": "ok",        "text": "Filed 2 card(s). On your plate: 1 card(s). Claude's queue: 1 card(s)." },
+    { "role": "user",      "text": "> what's on my plate?" },
+    { "role": "ok",        "text": "On your plate: 1 card(s). #8 Renew grant paperwork" }
+  ]
+}
