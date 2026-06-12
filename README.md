@@ -1,84 +1,31 @@
-# GitHub Boards Skill
+# GitHub Boards — drive your project board by conversation
 
-> Talk to your GitHub Projects (v2) Kanban board in plain language — *"put this on the board"*, *"what's on my plate?"*, *"what is Claude working on?"* — and have Claude read it, edit it (with your approval), and tell you what changed.
+**Your coding agent can run your real GitHub Projects board.** Tell it *"put these on the board"*, *"what's on my plate?"*, *"undo what happened since this morning"* — it previews every change, writes only with your OK, and reports back.
 
-**A standalone, self-contained, MIT-licensed [Claude Code](https://code.claude.com) skill.** It reads and edits a GitHub Projects v2 board, routes work as 🤖 agent-actionable vs 🧍 human-actionable, previews every change before writing, and reports back. It is **composable**: any other skill (deep-research, grant work, your own) can call it to drop tasks onto the board.
+[![MIT license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet)](https://code.claude.com) [![works via AGENTS.md](https://img.shields.io/badge/other%20agents-AGENTS.md-blue)](AGENTS.md) [![Node ≥18](https://img.shields.io/badge/node-%E2%89%A518-brightgreen)](package.json)
 
-> **Status: all six milestones shipped (M1–M6).** 423 tests — 419 passing, 4 operator-gated live skips. One operator live-E2E run remains before 1.0 — see [docs/LIVE-RUNBOOK.md](docs/LIVE-RUNBOOK.md) and the [ROADMAP](ROADMAP.md).
+![Demo: filing two cards by conversation, with a staged preview and report-back](assets/demo.svg)
 
----
+<details><summary>Demo as text</summary>
 
-## What it does
+> **You:** put these on the board: fix the login redirect bug (for Claude), renew the grant paperwork (for me)
+> **Agent:** Running it staged first — nothing is written yet:
+> `Would file 2 card(s): 'Fix login redirect bug' → Ideas (agent); 'Renew grant paperwork' → Ideas (human). On your plate: 1 card(s). Claude's queue: 1 card(s).`
+> **Agent:** Look right? **You:** y
+> ✅ `Filed 2 card(s). On your plate: 1 card(s). Claude's queue: 1 card(s).`
+> **You:** what's on my plate?
+> ✅ `On your plate: 1 card(s). #8 Renew grant paperwork`
 
-| You say… | It does |
-|---|---|
-| "Put these three tasks on the board" | Files real Issues, adds them to the board, sets the starting lane + owner — after showing you a preview |
-| "What do I need to work on?" | Lists the 🧍 human-actionable cards (your plate) |
-| "What is Claude working on?" | Lists the 🤖 agent-actionable cards |
-| "Move the API card to Review" | Moves the card to that lane |
-| "This one needs me" / "Hand it to Claude" | Re-routes the card's owner and keeps it claimed |
-| "Reject this, but keep the learnings" | Moves it to the *Rejected (learnings kept)* lane with a note |
-| "What changed since last time?" | Diffs the board against the last time you looked |
-| "Promote the backlog" | Maps the intent ledger into card proposals, then promotes confident ones to the board (idempotent) |
-| "Sync my TODOs / record this skill's tasks" | Scans watched source files for unfinished work items, extracts them, and feeds them into the ledger for the next promote pass |
-| "Is the board out of sync? / heal the ledger" | Drift report across source files, ledger, and board — then targeted ledger-only healing (board untouched) |
-| "What did the board look like before the cleanup?" | Board history via snapshots + the permanent event log |
-| "Undo what happened since this morning" | Computes and shows the inverse operation plan; executes on your approval |
-
-**Every change is previewed and needs your OK before it's written.** Nothing happens to your board silently.
-
-## The pipeline
-
-```
-sources (TODO.md, plans, other skills' artifacts)
-  └─ sync scan / sync record ─► intent LEDGER ─► map ─► promote plan / promote apply ─► BOARD
-                                                         maintenance loops:
-                                                         reconcile scan/apply  (drift → ledger-only healing)
-                                                         snapshot + event log  (board memory, undo anchor points)
-```
-
-Direct verbs (`put`, `move`, `route`, …) act on the board immediately. The pipeline verbs batch work through the ledger so nothing is filed twice and every promotion is resumable mid-batch.
-
-**Hooks** keep you informed without being asked: on session start, a board digest (what changed since your last look) is injected automatically. When a watched source file changes during a session, a one-line note appears once per file as the cue to run `sync scan`.
-
-## Verification
-
-Deterministic drift gates inside `npm test` keep the prose honest — if a CLI verb is added or removed, a failing test tells you the docs are stale. The test suite also includes a simulation world (multi-session lifecycle scenarios) and a seeded soak run that checks invariants after random op sequences. The live suite (`GBS_LIVE=1`) is operator-gated — one full pass before 1.0; see [docs/LIVE-RUNBOOK.md](docs/LIVE-RUNBOOK.md).
-
-## Why this exists
-
-GitHub Projects can be driven by an agent, but the raw API has sharp edges (it's easy to create the wrong kind of card or write the wrong field) and no notion of *"can the AI do this, or do I have to?"*. This skill is a thin, safe, conversational layer that encodes those rules once and makes the board easy to drive by voice — for software work **and** non-software work (e.g. grant paperwork, where most cards are human-actionable).
-
-## How it works (two layers, one repo)
-
-```
-  You / other skills  ─►  github-boards skill  ─►  bundled board engine (gh CLI + GraphQL)  ─►  GitHub Projects v2
-                            (natural language,        (read / make / move, with a
-                             owner routing,            staged preview of every write)
-                             "what's on my plate",
-                             report-back)
-```
-
-Both layers ship in **this** repo, so it installs and runs without any other project.
-
-## Prerequisites
-
-- **[Claude Code](https://code.claude.com)** — the runtime.
-- **[GitHub CLI (`gh`)](https://cli.github.com)**, authenticated: run `gh auth login` once. The skill uses your stored credentials — **you never paste a token into a config file.**
-- A GitHub token with **`project`** scope (a classic PAT, or a fine-grained PAT with *Projects: read & write*). `gh auth login` can grant this.
-- **Node.js 18+** on your PATH. *(Claude Code does not bundle Node; the engine is a Node script.)*
-- A **GitHub Project (v2)** board — see *One-time board setup* below.
+</details>
 
 ## Install
-
-**Recommended — as a Claude Code plugin:**
 
 ```
 /plugin marketplace add deocracy/github-boards-skill
 /plugin install github-boards@github-boards-skill
 ```
 
-*(Choose a scope when prompted: `user` = all your projects, `project` = shared via version control, `local` = this session.)*
+Already have [`gh`](https://cli.github.com) authenticated and Node 18+? You're done — say *"set up a board for this repo"* and the skill walks you through the rest (or see [Prerequisites](#prerequisites)).
 
 **Manual fallback:**
 
@@ -87,7 +34,54 @@ git clone https://github.com/deocracy/github-boards-skill ~/.claude/skills-src/g
 # then copy skills/github-boards/ into ~/.claude/skills/
 ```
 
-> These install commands work once the repo is published at `deocracy/github-boards-skill` — see Status above.
+## What you can say
+
+| You say… | What happens |
+|---|---|
+| "Put these three tasks on the board" | Files real Issues onto the board (`put`) — after a staged preview you approve |
+| "What's on my plate?" / "What is Claude working on?" | Your 🧍 queue vs the 🤖 agent queue (`queue human` / `queue agent`) |
+| "Move the API card to Review" / "This one needs me" | Lane moves (`move`) and owner re-routing (`route`) |
+| "Reject this, keep the learnings" | Terminal lane + a recorded note (`reject`) |
+| "Sync my TODOs onto the board" | Watched files → extraction → ledger (`sync scan` / `sync record`) — nothing touches the board yet |
+| "Figure out what belongs on the board" / "Promote the backlog" | The mapper proposes cards (`map`), then `promote` files them — idempotent and resume-safe |
+| "What changed this week?" / "Is the board out of sync?" | `summary` diffs since last look; `reconcile` heals ledger drift (never the board) |
+| "What did the board look like before the cleanup?" / "Undo what happened since X" | `snapshot` history, diffs, and a computed undo plan (`snapshot invert`) you approve op by op |
+
+Power-user extras: `followup` (file child cards), `reshape` (lane presets), `bootstrap` (provision a board from the current repo), `ledger` (the pipeline's inbox), and `--staged` on any write to preview without committing. Full verb reference: [wiki Usage](wiki/Usage.md).
+
+## Why it's safe to point at your real board
+
+- **Every write is previewed first.** The skill runs verbs staged, shows you the exact cards/lanes/labels, and commits only on your explicit OK. Never a silent write.
+- **Fail-closed.** Missing config, ambiguous board, inaccessible project → it stops and says so. It never guesses.
+- **Owner-routing is explicit.** 🤖 `agent:go` vs 🧍 `needs-claude` labels say *who should act* — your queue stays real, and human-routed cards escalate with a mention instead of silently parking.
+- **History with an undo.** Every session snapshots the board; a permanent journal records what changed; *"undo since X"* computes the exact inverse plan and replays it through the same approval-gated verbs.
+- **Your credentials stay yours.** It drives the [`gh` CLI](https://cli.github.com) you already authenticated — no tokens in config files.
+
+## The pipeline (for batch work)
+
+```
+TODO.md / plans / other skills' artifacts
+   └─ sync ─► intent ledger ─► map (LLM proposes, code validates) ─► promote ─► board
+                                      maintenance: reconcile (ledger healing) · snapshots (memory + undo)
+```
+
+Direct verbs act immediately; the pipeline batches work through a ledger so nothing files twice and every promotion resumes after a crash. Hooks keep you oriented: a board digest at session start, a one-line note when a watched file changes.
+
+## Works with other agents
+
+The skill's instruction body is vendor-neutral and mirrored to [`AGENTS.md`](AGENTS.md) — agents that read the AGENTS.md convention (Codex, Cursor, and friends) get the same contract. All board logic lives in the bundled scripts, not in any vendor's prompt format.
+
+## Calling it from other skills
+
+Any skill can record work onto the board — *"use the github-boards skill to put these tasks on the board"* — and gets the same staged-preview contract plus a report-back to relay. Contract: [docs/COMPOSABILITY.md](docs/COMPOSABILITY.md).
+
+## Prerequisites
+
+- **[Claude Code](https://code.claude.com)** — the runtime.
+- **[GitHub CLI (`gh`)](https://cli.github.com)**, authenticated: run `gh auth login` once. The skill uses your stored credentials — **you never paste a token into a config file.**
+- A GitHub token with **`project`** scope (a classic PAT, or a fine-grained PAT with *Projects: read & write*). `gh auth login` can grant this.
+- **Node.js 18+** on your PATH. *(Claude Code does not bundle Node; the engine is a Node script.)*
+- A **GitHub Project (v2)** board — see *One-time board setup* below.
 
 ## One-time board setup (the human step)
 
@@ -99,48 +93,10 @@ GitHub does **not** let any token create or group a board *view* — that's brow
 
 The skill's `doctor` command prints this checklist and tells you exactly what's missing. After that, the skill handles everything data-shaped (filing cards, moving lanes, routing, commenting).
 
-## Configuration
+## Project status
 
-A `board.json` file binds the skill to your board:
-
-```jsonc
-{
-  "owner":         "deocracy",            // repo/project owner login (org or user)
-  "ownerType":     "organization",        // "organization" or "user"
-  "projectNumber": 23,                    // the project number (from the URL)
-  "projectId":     "PVT_…",              // Project v2 node id (found by doctor)
-  "repo":          "deocracy/your-repo",  // owner/repo slug
-  "stageFieldId":  "PVTSSF_…",           // the Stage single-select field id
-  "stageOptions":  { "Ideas": "…optionId", "Building": "…optionId" },  // lane label → option id
-  "preset":        "build",               // or "grants" — the lane-shape template
-  "routing":       { "agent": "agent:go", "human": "needs-claude" }    // 🤖/🧍 labels (optional; these are the defaults)
-}
-```
-
-Run `doctor` to discover these IDs for you. Lanes are **read from config**, so a *software* board and a *grants* board can have different columns without any code change.
-
-## Usage
-
-Just talk to Claude once the skill is installed and `board.json` is set. Or use the `/board` slash command in-session. Example phrases are in the table at the top; full verb reference in [docs/](docs/) and the [wiki](../../wiki).
-
-## Composability — calling it from other skills
-
-This skill is designed to be **invoked by other skills**. Any skill can say *"use the github-boards skill to put these tasks on the board"* and it will file + preview + report back. See [docs/COMPOSABILITY.md](docs/COMPOSABILITY.md) for the callable contract and the report-back protocol.
-
-## Memory
-
-The skill keeps a small, delete-safe `.github-boards/state.json` (git-ignored) recording what the board looked like last time, so it can tell you *what changed* since you were last here. **The board itself is always the source of truth**; the state file is just a "where I left off" marker.
-
-## Known limitations (v1)
-
-- **Staged previews:** in staged mode nothing is written to the board, but a fully *offline* preview of a multi-step write is not possible — the engine performs validation reads before the write guard. Previews are accurate about intent.
-- **`reshape`:** produces a diff + a human checklist of the lanes to add/rename in the GitHub UI; it does not auto-modify the board's Stage options (GitHub API limitation). The board *view* grouping (group-by Stage) is UI-only regardless — no API can set it.
-- **Hooks:** SessionStart context injection, `$ARGUMENTS` expansion, and the PreToolUse auto-allow are verified against a live session in integration. On some setups, plugin SessionStart context injection may not surface (a documented upstream issue) — the skill still works fully via the `/board` command and direct calls.
-
-## Agnosticism
-
-v1 targets **Claude Code**. The board rules live in one vendor-neutral instruction body, and the verb contract is built so an **MCP server** (for Codex / Cursor / CI / other agents) is a thin add-on later — see the [ROADMAP](ROADMAP.md).
+Actively maintained and fully tested (the whole pipeline runs under a deterministic simulation harness — crash recovery, multi-session lifecycles, a seeded soak). One live-hardening pass against a real board remains before 1.0 — see the [runbook](docs/LIVE-RUNBOOK.md) and [ROADMAP](ROADMAP.md).
 
 ## License
 
-[MIT](LICENSE) © Deocracy Institute.
+MIT — see [LICENSE](LICENSE).

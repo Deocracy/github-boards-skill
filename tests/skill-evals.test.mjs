@@ -113,3 +113,17 @@ test('demo SVG: parses as XML, references no external resources, and its text co
     assert.ok(svg.includes(probe.split(' ').slice(0, 4).join(' ')), `transcript line missing from SVG: ${line.text.slice(0, 50)}…`);
   }
 });
+
+const readme = read('README.md');
+
+test('README documents every CLI verb family (the storefront is drift-gated)', () => {
+  const missing = verbTokens.filter((v) => !readme.includes('`' + v));
+  assert.deepEqual(missing, [], `README is missing CLI verb(s): ${missing.join(', ')}`);
+});
+
+test('README first screen: install snippet + demo asset present and demo file exists', () => {
+  assert.ok(readme.includes('/plugin marketplace add deocracy/github-boards-skill'), 'install command 1 missing');
+  assert.ok(readme.includes('/plugin install github-boards@github-boards-skill'), 'install command 2 missing');
+  assert.ok(readme.includes('assets/demo.svg'), 'README must embed the demo');
+  assert.ok(existsSync(join(ROOT, 'assets', 'demo.svg')), 'demo asset missing');
+});
