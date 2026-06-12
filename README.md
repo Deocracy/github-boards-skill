@@ -11,7 +11,8 @@
 > **You:** put these on the board: fix the login redirect bug (for Claude), renew the grant paperwork (for me)
 > **Agent:** Running it staged first — nothing is written yet:
 > `Would file 2 card(s): 'Fix login redirect bug' → Ideas (agent); 'Renew grant paperwork' → Ideas (human). On your plate: 1 card(s). Claude's queue: 1 card(s).`
-> **Agent:** Look right? **You:** y
+> **Agent:** Look right? (y/n)
+> **You:** y
 > ✅ `Filed 2 card(s). On your plate: 1 card(s). Claude's queue: 1 card(s).`
 > **You:** what's on my plate?
 > ✅ `On your plate: 1 card(s). #8 Renew grant paperwork`
@@ -51,7 +52,7 @@ Power-user extras: `followup` (file child cards), `reshape` (lane presets), `boo
 
 ## Why it's safe to point at your real board
 
-- **Every write is previewed first.** The skill runs verbs staged, shows you the exact cards/lanes/labels, and commits only on your explicit OK. Never a silent write.
+- **Every write is previewed first.** The skill runs verbs staged, shows you the exact cards/lanes/labels, and commits only on your explicit OK. Never a silent write to the board.
 - **Fail-closed.** Missing config, ambiguous board, inaccessible project → it stops and says so. It never guesses.
 - **Owner-routing is explicit.** 🤖 `agent:go` vs 🧍 `needs-claude` labels say *who should act* — your queue stays real, and human-routed cards escalate with a mention instead of silently parking.
 - **History with an undo.** Every session snapshots the board; a permanent journal records what changed; *"undo since X"* computes the exact inverse plan and replays it through the same approval-gated verbs.
