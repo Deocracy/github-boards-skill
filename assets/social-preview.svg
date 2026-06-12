@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" font-family="Segoe UI, Arial, sans-serif">
+  <!-- Background -->
+  <rect width="1280" height="640" fill="#0d1117"/>
+
+  <!-- Top accent bar -->
+  <rect width="1280" height="6" fill="#3fb950"/>
+
+  <!-- Title: GitHub Boards -->
+  <text x="80" y="260" font-size="72" font-weight="bold" fill="#ffffff" letter-spacing="-1">GitHub Boards</text>
+
+  <!-- Tagline line 1 -->
+  <text x="84" y="328" font-size="32" fill="#9da7b3">Drive your project board by conversation —</text>
+
+  <!-- Tagline line 2 -->
+  <text x="84" y="375" font-size="32" fill="#9da7b3">previewed, fail-closed, undoable.</text>
+
+  <!-- Feature chips line -->
+  <text x="84" y="450" font-size="22" font-family="Consolas, Courier New, monospace" fill="#3fb950">agent/human routing  ·  staged previews  ·  time-travel undo</text>
+
+  <!-- Footer -->
+  <text x="84" y="570" font-size="20" fill="#9da7b3">github.com/Deocracy/github-boards-skill  ·  MIT  ·  Deocracy Institute</text>
+</svg>
