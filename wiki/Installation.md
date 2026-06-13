@@ -25,9 +25,9 @@ The skill invokes `scripts/board-manager.mjs` and `scripts/board.mjs`; those scr
 # Clone anywhere — keep the whole repo (scripts/ must stay alongside skills/):
 git clone https://github.com/deocracy/github-boards-skill ~/github-boards-skill
 
-# Register the clone as a local plugin from the repo root:
-cd ~/github-boards-skill
-claude plugin add .
+# Register the clone as a local marketplace and install from it:
+claude plugin marketplace add ~/github-boards-skill
+claude plugin install github-boards@github-boards-skill
 ```
 
 Do NOT copy only `skills/github-boards/` into `~/.claude/skills/` — that strips the engine scripts.

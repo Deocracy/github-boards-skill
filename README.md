@@ -36,11 +36,9 @@ The skill invokes `scripts/board-manager.mjs` and `scripts/board.mjs`; those scr
 # 1. Clone anywhere — keep the whole repo intact (scripts/ must stay alongside skills/):
 git clone https://github.com/deocracy/github-boards-skill ~/github-boards-skill
 
-# 2. Register the clone as a local plugin in Claude Code:
-#    Open your Claude Code settings (claude.json / settings.json) and add the
-#    clone's root to the plugin paths list, OR run from the repo root:
-cd ~/github-boards-skill
-claude plugin add .
+# 2. Register the clone as a local marketplace and install from it:
+claude plugin marketplace add ~/github-boards-skill
+claude plugin install github-boards@github-boards-skill
 
 # The plugin install keeps scripts/ and skills/ together at the repo root,
 # so the skill's script references resolve correctly.
