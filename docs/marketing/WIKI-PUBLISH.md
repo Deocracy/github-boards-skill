@@ -18,6 +18,10 @@ gh release create v0.2.0 --title "v0.2.0 — the conversational board, complete"
 
 The `wiki/` folder ships in-repo; GitHub's Wiki tab is a separate git repo. To publish:
 
+> **First-time prerequisite:** The wiki git remote (`github-boards-skill.wiki.git`) returns a 404 and rejects clones until at least ONE page exists in the GitHub web UI. Before running the commands below, go to the repo's Wiki tab in a browser and create any page (e.g. "Home" with a single line). That one page initialises the wiki git repo and makes the clone URL work.
+
+> **Timing:** the repo's homepage already points visitors at the wiki tab, so publishing is time-sensitive — do this promptly after the branch merges.
+
 ```bash
 git clone https://github.com/Deocracy/github-boards-skill.wiki.git ../gbs-wiki
 cp wiki/*.md ../gbs-wiki/

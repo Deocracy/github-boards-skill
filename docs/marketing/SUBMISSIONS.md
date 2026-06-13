@@ -30,7 +30,7 @@ Repo: https://github.com/Deocracy/github-boards-skill
 ```json
 {
   "name": "github-boards",
-  "description": "Conversational GitHub Projects v2 board: file/move/route cards by talking, staged preview before every write, agent-vs-human queues, pipeline batching with dedup, drift healing, and snapshot-based undo. MIT, vendor-neutral via AGENTS.md.",
+  "description": "Conversational GitHub Projects v2 board for coding agents: file/move/route cards by talking, staged preview before every write, agent-vs-human queues, pipeline batching with dedup, drift healing, and snapshot-based undo. MIT, zero runtime deps, vendor-neutral via AGENTS.md.",
   "source": {
     "source": "github",
     "repo": "Deocracy/github-boards-skill"
@@ -78,7 +78,7 @@ Drive a real GitHub Projects v2 Kanban board by conversation:
 
 **Mechanism:** Path B (recommended for external repos) — open a PR against `jeremylongshore/claude-code-plugins-plus-skills` that adds one entry to `sources.yaml`. Their repo stays the source of truth; a weekly sync (Mondays 06:00 UTC) pulls the latest content and opens an automated PR. A maintainer can trigger an immediate sync via `gh workflow run sync-external.yml`. Do NOT hand-edit the README — the category tables are auto-generated.
 
-**Submission bar:** Full-capability, enterprise-grade: SKILL.md with complete frontmatter, README, LICENSE, and a score ≥ threshold on their 100-point rubric. Validator: `python3 scripts/validate-skills-schema.py --marketplace --verbose plugins/community/github-boards/` (run locally before opening the PR using their `./scripts/quick-test.sh`). Our SKILL.md already carries the full frontmatter schema.
+**Submission bar:** Full-capability, enterprise-grade: SKILL.md with complete frontmatter, README, LICENSE, and a score ≥ threshold on their 100-point rubric. Validator: `python3 scripts/validate-skills-schema.py --marketplace --verbose plugins/community/github-boards/` (run locally before opening the PR using their `./scripts/quick-test.sh`). Our SKILL.md carries the required `name`, `description`, and `allowed-tools` frontmatter; their optional `version` and `author` fields have been added (v0.2.0 / Deocracy Institute) — confirm with the validator before filing.
 
 **Verified at:** https://raw.githubusercontent.com/jeremylongshore/claude-code-plugins-plus-skills/main/CONTRIBUTING.md (§ "Path B — Auto-sync from your own repo")
 
@@ -92,7 +92,7 @@ Drive a real GitHub Projects v2 Kanban board by conversation:
 
 ```yaml
 - name: github-boards
-  description: Conversational GitHub Projects v2 board for coding agents: file/move/route cards by talking, staged preview before every write, agent-vs-human queues, pipeline batching with dedup, drift healing, and snapshot-based undo.
+  description: 'Conversational GitHub Projects v2 board for coding agents: file/move/route cards by talking, staged preview before every write, agent-vs-human queues, pipeline batching with dedup, drift healing, and snapshot-based undo. MIT, zero runtime deps, vendor-neutral via AGENTS.md.'
   repo: Deocracy/github-boards-skill
   source_path: .
   target_path: plugins/community/github-boards
@@ -104,19 +104,23 @@ Drive a real GitHub Projects v2 Kanban board by conversation:
   category: community
   verified: true
   include:
-    - 'SKILL.md'
+    - 'skills/**'
+    - 'scripts/**'
+    - 'commands/**'
+    - 'hooks/**'
+    - 'presets/**'
+    - '.claude-plugin/**'
     - 'AGENTS.md'
     - 'README.md'
     - 'LICENSE'
-    - 'CONTRIBUTING.md'
-    - 'SECURITY.md'
-    - '.claude-plugin/**'
-    - 'scripts/**'
-    - 'docs/**'
+    - 'board.example.json'
   exclude:
+    - 'docs/**'
+    - 'tests/**'
+    - 'wiki/**'
+    - 'evals/**'
     - 'node_modules/**'
     - '.git/**'
-    - 'tests/**'
     - 'assets/**'
 ```
 
@@ -188,9 +192,9 @@ https://github.com/hesreallyhim/awesome-claude-code/issues/new?template=recommen
 [Resource]: GitHub Boards — conversational GitHub Projects v2 board skill
 ```
 
-**Category:** Workflows & Knowledge Guides
+**Category:** Agent Skills
 
-**Sub-Category:** Project Management
+**Sub-Category:** Project Management *(verify: "Project Management" may not exist as a sub-category option in the form UI — confirm the available choices when filling out the form; the closest verified option from the kit's research is "Agent Skills" as the primary category)*
 
 **Display Name:**
 ```
@@ -238,7 +242,9 @@ Install the skill, then say: "put these on the board: fix the login redirect bug
 
 ## Submission order (recommended)
 
+> **Eligibility note:** awesome-claude-code requires the repo to have been public for more than 1 week before submission. This repo went public 2026-06-08; the earliest eligible submission date is approximately **2026-06-15**.
+
 1. **tonsofskills.com** — operator approves, agent opens the sources.yaml PR
 2. **agentskills.io** — operator approves, agent opens the marketplace.json PR
-3. **awesome-claude-code** — operator opens the browser issue form manually
+3. **awesome-claude-code** — operator opens the browser issue form manually (not before ~2026-06-15)
 4. **claudemarketplaces.com** — no action; monitor install count, auto-lists at 500+

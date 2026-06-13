@@ -1,5 +1,7 @@
 ---
 name: github-boards
+version: 0.2.0
+author: Deocracy Institute
 description: "Manage a GitHub Projects v2 Kanban board in natural language. Use when the user wants to put tasks or issues on a board, see what they (the human) need to work on versus what the AI is working on, move cards between lanes, route work as agent-actionable or human-actionable, reject with learnings, summarize what changed on the board, promote mapped backlog onto the board, sync TODOs or other skills' plans onto the board, check or heal ledger drift, browse board history, or undo recent board changes. Also use when ANOTHER skill needs to record tasks onto the board after research or planning. Reads and edits the board via the gh CLI and GitHub GraphQL, always previewing changes before writing and reporting back. Trigger phrases: put this on the board, add to kanban, what's on my plate, what is Claude working on, move card, update the board, show board status, reject with learnings, promote the backlog, sync my TODOs onto the board, heal the ledger, what changed this week, what did the board look like before, undo what happened since."
 allowed-tools: "Bash, Read, Write"
 ---

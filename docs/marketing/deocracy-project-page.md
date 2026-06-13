@@ -1,3 +1,5 @@
+> **Operator note:** publish this page only after the feat/m7-adoption branch merges to main — the demo image hotlinks raw.githubusercontent.com/main and will 404 or show stale content until then.
+
 # GitHub Boards — a Deocracy Institute open-source project
 
 *Drive your project board by conversation.*
