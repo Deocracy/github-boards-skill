@@ -3,7 +3,7 @@
 ## What this skill can touch
 
 - It drives the **`gh` CLI you already authenticated** — GitHub Issues and Projects v2 boards reachable by your token (`project` + `repo` scopes). No tokens are stored in any config file in this repo.
-- Local state lives in `.github-boards/` in your working directory (ledger, snapshots, last-seen state) — plain JSON, gitignored by default.
+- Local state lives in `.github-boards/` in your working directory (ledger, snapshots, last-seen state) — plain JSON. This repo's own `.gitignore` ignores `.github-boards/`; in your own project repo, add the same line to keep it out of version control.
 - Every board write is staged-previewed and requires explicit approval; the engine fails closed on missing or ambiguous configuration.
 - The hooks are read-only toward GitHub: the session-start hook reads the board to build a digest; the file-watch hook only reads local files.
 

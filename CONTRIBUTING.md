@@ -22,4 +22,4 @@ Node ≥18. There is no build step.
 
 ## Releases
 
-Version bumps in `.claude-plugin/plugin.json` + `marketplace.json` together; directory listings get re-checked on every bump.
+Version bumps in `.claude-plugin/plugin.json`, `marketplace.json`, and `package.json` together; directory listings get re-checked on every bump.

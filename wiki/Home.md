@@ -11,13 +11,13 @@ Talk to your GitHub Projects (v2) Kanban board in plain language. Claude reads i
 - **[Usage](Usage)** — the things you can say, and what each does.
 - **[Composability](Composability)** — how other skills call this one.
 - **[Architecture](Architecture)** — how it's built (and why).
-- **[Roadmap](Roadmap)** — what shipped in M1–M6 and what's next.
+- **[Roadmap](Roadmap)** — what shipped (through v0.2.0) and what's next.
 
 ## In one breath
 
 Two layers in one self-contained, MIT skill: a **board engine** (`gh` CLI + GraphQL, with a preview of every write) and a **conversational layer** (natural language, owner routing, "what's on my plate", report-back). Installs as a Claude Code plugin.
 
-**Status: all six milestones shipped (M1–M6).** 423 tests — 419 passing, 4 operator-gated live skips. One operator live-E2E run remains before 1.0 — see [Roadmap](Roadmap).
+**Status: v0.2.0 — all pipeline features shipped and fully tested.** 426 tests — 422 passing, 4 operator-gated live skips. One operator live-E2E run against a real board remains before 1.0 — see [Roadmap](Roadmap).
 
 ## What it can do
 

@@ -24,7 +24,7 @@
 - [x] `commands/board.md` — the `/board` slash command.
 - [x] `hooks/` — SessionStart (board digest + source-change notes), PostToolUse (real-time file-watch trigger), PreToolUse (pre-allow the script).
 - [x] `board.json` schema + `doctor`-assisted discovery of IDs.
-- [x] 423 tests (419 passing, 4 operator-gated live skips) — deterministic drift gates keep docs honest.
+- [x] 426 tests (422 passing, 4 operator-gated live skips) — deterministic drift gates keep docs honest.
 - [ ] Operator live-E2E run (`GBS_LIVE=1`) — see [`docs/LIVE-RUNBOOK.md`](../docs/LIVE-RUNBOOK.md).
 - [ ] First marketplace publish (`deocracy/github-boards-skill`).
 

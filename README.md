@@ -28,11 +28,23 @@
 
 Already have [`gh`](https://cli.github.com) authenticated and Node 18+? You're done — say *"set up a board for this repo"* and the skill walks you through the rest (or see [Prerequisites](#prerequisites)).
 
-**Manual fallback:**
+**Manual fallback (clone the full repo — the skill needs the bundled scripts):**
 
-```
-git clone https://github.com/deocracy/github-boards-skill ~/.claude/skills-src/github-boards-skill
-# then copy skills/github-boards/ into ~/.claude/skills/
+The skill invokes `scripts/board-manager.mjs` and `scripts/board.mjs`; those scripts live at the **repo root**, not inside `skills/github-boards/`. Copying only `skills/github-boards/` into `~/.claude/skills/` leaves the scripts behind and nothing runs. Keep the entire clone intact and register it as a local plugin:
+
+```bash
+# 1. Clone anywhere — keep the whole repo intact (scripts/ must stay alongside skills/):
+git clone https://github.com/deocracy/github-boards-skill ~/github-boards-skill
+
+# 2. Register the clone as a local plugin in Claude Code:
+#    Open your Claude Code settings (claude.json / settings.json) and add the
+#    clone's root to the plugin paths list, OR run from the repo root:
+cd ~/github-boards-skill
+claude plugin add .
+
+# The plugin install keeps scripts/ and skills/ together at the repo root,
+# so the skill's script references resolve correctly.
+# Do NOT copy just skills/github-boards/ — that strips the scripts.
 ```
 
 ## What you can say
@@ -80,7 +92,7 @@ Any skill can record work onto the board — *"use the github-boards skill to pu
 
 - **[Claude Code](https://code.claude.com)** — the runtime.
 - **[GitHub CLI (`gh`)](https://cli.github.com)**, authenticated: run `gh auth login` once. The skill uses your stored credentials — **you never paste a token into a config file.**
-- A GitHub token with **`project`** scope (a classic PAT, or a fine-grained PAT with *Projects: read & write*). `gh auth login` can grant this.
+- A GitHub token with **`project`** and **`repo`** scopes (a classic PAT, or a fine-grained PAT with *Projects: read & write* and *Issues: read & write*). `gh auth login` can grant these. (`repo` is required because the skill files real GitHub Issues.)
 - **Node.js 18+** on your PATH. *(Claude Code does not bundle Node; the engine is a Node script.)*
 - A **GitHub Project (v2)** board — see *One-time board setup* below.
 
