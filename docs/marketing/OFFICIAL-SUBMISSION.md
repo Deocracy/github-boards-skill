@@ -1,6 +1,6 @@
 # Official plugin-directory submission — paste-ready package
 
-**Form:** https://clau.de/plugin-directory-submission (operator files this)
+**Form:** <https://clau.de/plugin-directory-submission> — Anthropic's official shortlink (redirects to the current submission flow). Direct Console form: <https://platform.claude.com/plugins/submit>. Operator files this.
 **PRECONDITIONS (in order):** ① the live E2E has passed once (docs/LIVE-RUNBOOK.md) ② the storefront branch is merged & released (v0.2.0) ③ README status line updated.
 
 ## Form fields

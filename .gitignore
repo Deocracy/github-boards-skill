@@ -19,3 +19,7 @@ npm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# Context-mode scratch files
+cm-*.html
+nul

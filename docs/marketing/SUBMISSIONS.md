@@ -90,6 +90,8 @@ Drive a real GitHub Projects v2 Kanban board by conversation:
 
 ### sources.yaml entry (paste-ready, add to sources.yaml in their repo)
 
+> Append this item under the existing top-level `sources:` key in their `sources.yaml` (don't create a second `sources:`).
+
 ```yaml
 - name: github-boards
   description: 'Conversational GitHub Projects v2 board for coding agents: file/move/route cards by talking, staged preview before every write, agent-vs-human queues, pipeline batching with dedup, drift healing, and snapshot-based undo. MIT, zero runtime deps, vendor-neutral via AGENTS.md.'
@@ -114,6 +116,7 @@ Drive a real GitHub Projects v2 Kanban board by conversation:
     - 'README.md'
     - 'LICENSE'
     - 'board.example.json'
+    - 'assets/demo.svg'
   exclude:
     - 'docs/**'
     - 'tests/**'

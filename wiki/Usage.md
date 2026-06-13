@@ -51,7 +51,7 @@ Add `--staged` to any write verb to preview changes without committing them.
 | "What did the board look like before X?" | `snapshot diff <ref>` | Same as above, scoped to an anchor |
 | "Undo what happened since this morning" | `snapshot invert [ref]` | Computes the inverse operation plan (read-only); execute `ops` via `move`/`route` after approval |
 
-**Undo flow:** run `snapshot list` to pin an anchor, then `snapshot invert <anchor>` to get the plan. Approve it, then execute the `ops` list one by one. Full contract: [`references/undo-contract.md`](../references/undo-contract.md).
+**Undo flow:** run `snapshot list` to pin an anchor, then `snapshot invert <anchor>` to get the plan. Approve it, then execute the `ops` list one by one. Full contract: [`references/undo-contract.md`](https://github.com/Deocracy/github-boards-skill/blob/main/skills/github-boards/references/undo-contract.md).
 
 ## The two rules that always hold
 

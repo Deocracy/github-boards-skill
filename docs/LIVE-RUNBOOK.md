@@ -75,8 +75,8 @@ runtime is typically 1–3 minutes (GraphQL round-trips to GitHub).
 
 The final suite line should read:
 ```
-# tests 419
-# pass 419
+# tests 426
+# pass 426
 # fail 0
 # skipped 0
 ```

@@ -6,6 +6,7 @@ Run these commands **after the feat/m7-adoption branch is merged to main** — n
 
 ```bash
 git tag v0.2.0
+git push origin v0.2.0
 gh release create v0.2.0 --title "v0.2.0 — the conversational board, complete" --notes "Drive a GitHub Projects v2 board by conversation from Claude Code (or any AGENTS.md-reading agent): file/move/route/reject cards with a staged preview before every write, batch work through a dedup'd pipeline (sync → map → promote), heal drift without touching the board, and time-travel — snapshots, a permanent change journal, and a computed undo plan.
 
 - Install: \`/plugin marketplace add deocracy/github-boards-skill\` then \`/plugin install github-boards@github-boards-skill\`

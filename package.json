@@ -1,7 +1,7 @@
 {
   "name": "github-boards-skill",
   "version": "0.2.0",
-  "description": "Conversational, composable Claude Code skill to read and edit a GitHub Projects v2 Kanban board — natural-language board driving with agent/human task routing, staged previews, and report-back.",
+  "description": "Conversational, composable Claude Code skill to read and edit a GitHub Projects v2 Kanban board — natural-language driving with agent/human routing, staged previews, pipeline promotion, source sync, drift reconcile, time-travel snapshots, and undo.",
   "type": "module",
   "license": "MIT",
   "author": "Deocracy Institute",

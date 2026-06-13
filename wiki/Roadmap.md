@@ -13,7 +13,7 @@
 | M3c Real-Time Triggering | 2026-06-10 | PostToolUse hook surfaces watched-file changes to Claude mid-session the moment they're written — stateless signal, no queue |
 | M4a Reconcile | 2026-06-10 | `reconcile scan` / `reconcile apply` — classifies drift across source files, ledger, and board; heals the ledger only (board mutations stay `promote`'s job) |
 | M4b Time-Travel | 2026-06-10 | `snapshot` family — pruned full-board save-points + a never-pruned event log; `snapshot invert` produces a mechanically-computed undo plan |
-| M5 Skill Layer | 2026-06-11 | SKILL.md + AGENTS.md rewritten to the full pipeline; `references/undo-contract.md`; deterministic prose drift gates wired into `npm test` |
+| M5 Skill Layer | 2026-06-11 | SKILL.md + AGENTS.md rewritten to the full pipeline; `skills/github-boards/references/undo-contract.md`; deterministic prose drift gates wired into `npm test` |
 | M6 Verification | 2026-06-11 | Simulation world (multi-session lifecycle scenarios) + seeded soak + crash atlas covering every multi-write gap; one gated live-E2E + runbook |
 
 ## v1 checklist (the publishable core)

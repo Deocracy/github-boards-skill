@@ -17,6 +17,7 @@ A `board.json` binds the skill to your board. Run `doctor` to discover the IDs.
   },
   "preset":   "build",                    // or "grants" — selects the lane shape template
   "routing":  { "agent": "agent:go", "human": "needs-claude" },  // 🤖/🧍 labels (optional, these are the defaults)
+  "projectUrl": "https://github.com/orgs/your-org/projects/23",  // full GitHub project URL (for links in output)
   "pushPolicy":    "on-approval",         // writes only happen after explicit user OK
   "pullCadence":   "session-start",       // when to pull a fresh board digest
   "sources": {
@@ -28,6 +29,7 @@ A `board.json` binds the skill to your board. Run `doctor` to discover the IDs.
   },
   "rules": {
     "maxLanes":                8,
+    "useTags":                 false,     // tag-based routing (false = label-based, the default)
     "defaultOwner":            "human",
     "granularity":             "fine",
     "escalateConfidenceBelow": 0.6,
@@ -51,6 +53,18 @@ Controls the `sync` verb and the PostToolUse real-time hook.
 Controls the `snapshot` family.
 
 - **`keep`** — how many pruned full-board save-points to retain. The permanent event log (`log.jsonl`) is **never** pruned regardless of this setting.
+
+### `rules`
+
+Fine-tunes routing and confidence thresholds.
+
+- **`useTags`** — when `false` (default), routing uses GitHub labels. Set to `true` to use GitHub tags instead.
+- **`maxLanes`** — maximum number of lanes; `doctor` warns if the board exceeds this.
+- **`defaultOwner`** — `"human"` or `"agent"`. Cards with no explicit owner signal are routed here.
+- **`granularity`** — `"fine"` (one card per work item) or `"coarse"` (batched cards).
+- **`escalateConfidenceBelow`** — route confidence threshold below which the skill escalates to the human queue.
+- **`escalateBatchOver`** — batch size above which routing is always escalated regardless of confidence.
+- **`promoteConfidenceBelow`** — confidence threshold below which `promote` pauses for confirmation.
 
 ### `stageOptions` and `preset`
 
