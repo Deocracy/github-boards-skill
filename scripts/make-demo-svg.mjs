@@ -23,7 +23,7 @@ for (const line of t.lines) {
   let cur = prefix;
   for (const w of words) {
     if ((cur + ' ' + w).length > MAX_CHARS && cur !== prefix) {
-      rows.push({ role: line.role, text: cur, first: cur.startsWith(prefix) && rows.every((r) => r.lineRef !== line) });
+      rows.push({ role: line.role, text: cur });
       cur = ' '.repeat(prefix.length) + w;
     } else {
       cur = cur === prefix ? prefix + w : cur + ' ' + w;
@@ -34,7 +34,7 @@ for (const line of t.lines) {
 
 const BODY_TOP = 56;
 const H = BODY_TOP + rows.length * LINE_H + PAD;
-const TOTAL_S = rows.length * 0.9 + 3;  // reveal cadence + hold, then loop
+const TOTAL_S = rows.length * 0.9 + 4;  // reveal cadence + ~4s end-hold, then loop
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -48,10 +48,11 @@ const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, 
 // from their delayed first cycle, causing visible overlap. Per-row keyframes avoids
 // this entirely.
 const keyframes = rows.map((r, i) => {
-  const beginPct = ((i * 0.9) / TOTAL_S * 100).toFixed(2);
-  const onPct    = (((i * 0.9) + 0.3) / TOTAL_S * 100).toFixed(2);
-  const offPct   = ((TOTAL_S - 0.5) / TOTAL_S * 100).toFixed(2);
-  return `    @keyframes r${i} { 0%,${beginPct}% { opacity:0; } ${onPct}% { opacity:1; } ${offPct}%,100% { opacity:0; } }`;
+  const beginPct    = ((i * 0.9) / TOTAL_S * 100).toFixed(2);
+  const onPct       = (((i * 0.9) + 0.3) / TOTAL_S * 100).toFixed(2);
+  const offPct      = ((TOTAL_S - 0.5) / TOTAL_S * 100).toFixed(2);  // hold-end (opacity:1)
+  const endFadePct  = ((TOTAL_S - 0.1) / TOTAL_S * 100).toFixed(2);  // fade-to-0 complete
+  return `    @keyframes r${i} { 0%,${beginPct}% { opacity:0; } ${onPct}% { opacity:1; } ${offPct}% { opacity:1; } ${endFadePct}%,100% { opacity:0; } }`;
 }).join('\n');
 
 const textRows = rows.map((r, i) => {
